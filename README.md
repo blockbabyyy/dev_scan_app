@@ -11,7 +11,7 @@ To-do:
 
 ## Features
 
-*   Benchmarks multiple regex engines: [RE2](https://github.com/google/re2), [Boost.Regex](https://www.boost.org/doc/libs/release/libs/regex/), and [Hyperscan](https://github.com/intel/hyperscan).
+*   Benchmarks multiple regex engines: std::regex, [RE2](https://github.com/google/re2), [Boost.Regex](https://www.boost.org/doc/libs/release/libs/regex/), and [Hyperscan](https://github.com/intel/hyperscan).
 *   Uses [Google Benchmark](https://github.com/google/benchmark) for standardized performance measurement.
 *   Configured with CMake for cross-platform building.
 
