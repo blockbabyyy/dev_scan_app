@@ -16,6 +16,7 @@ const std::string doc_header = "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1";
 const std::string png_header = "\x89PNG\r\n\x1A\n";
 const std::string rar4_header = "\x52\x61\x72\x21\x1A\x07\x00";
 const std::string rar5_header = "\x52\x61\x72\x21\x1A\x07\x01\x00";
+//work is in progress
 
 // RE2 (Google)
 bool check_file_signature_re2(const std::string& file_path, const std::string& signature, size_t size, re2::RE2::Options& opt) {
@@ -152,7 +153,7 @@ bool check_file_signature_hs(const std::string& file_path, const std::string& si
 }
 // Основная функция подсчёта файлов по сигнатурам для всех трёх regex-движков
 void count_files(const std::string& directory, re2::RE2::Options& opt) {
-    // Счётчики для каждого движка
+    // Счётчики для каждого движка (ИСПРАВИТЬ docx на doc)
     int pdf_count_re2 = 0, docx_count_re2 = 0, png_count_re2 = 0, rar_count_re2 = 0, other_count_re2 = 0;
     int pdf_count_boost = 0, docx_count_boost = 0, png_count_boost = 0, rar_count_boost = 0, other_count_boost = 0;
     int pdf_count_std = 0, docx_count_std = 0, png_count_std = 0, rar_count_std = 0, other_count_std = 0;
