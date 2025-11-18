@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
 project(RegexBench)
 
-# --- Укажите путь к vcpkg ВРУЧНУЮ ---
+# Укажите путь к vcpkg ВРУЧНУЮ!!!
 # Замените C:/vcpkg на ваш реальный путь к директории vcpkg
 set(VCPKG_ROOT "C:/vcpkg" CACHE STRING "Path to vcpkg root directory" FORCE)
 
-# --- Укажите триплет (опционально, но рекомендуется для ясности) ---
+#  Укажите триплет (опционально)
 # Замените x64-windows, если вы используете другой (например, x86-windows, x64-windows-static)
 set(VCPKG_DEFAULT_TRIPLET "x64-windows" CACHE STRING "vcpkg triplet (e.g., x64-windows)" FORCE)
 
@@ -18,7 +18,7 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# --- Поиск Hyperscan ---
+#  Поиск Hyperscan 
 # Используем переменные VCPKG_ROOT и VCPKG_DEFAULT_TRIPLET, заданные выше
 find_path(HYPERSCAN_INCLUDE_DIR
     NAMES hs/hs.h  # hs.h находится внутри поддиректории hs/
@@ -43,11 +43,27 @@ find_package(RE2 CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS regex)
 find_package(benchmark CONFIG REQUIRED)
 
+# Исходные файлы проекта
+set(SOURCES
+    src/main.cpp
+    src/generators/TestDataGenerator.cpp
+    src/generators/FileType.cpp
+    src/generators/ContainerWrapper.cpp
+    
+)
+
+# Заголовочные файлы
+set(HEADERS
+    include/generators/TestDataGenerator.hpp
+    include/generators/FileType.hpp
+    include/generators/ContainerWrapper.hpp
+  
+)
+
 # Исполняемый файл
 add_executable(RegexBench main.cpp)
 
 # Подключаем *корневую* директорию заголовков vcpkg (например, C:/vcpkg/installed/x64-windows/include)
-# Это позволяет использовать #include <hs/hs.h> в вашем C++ коде
 target_include_directories(RegexBench PRIVATE ${HYPERSCAN_INCLUDE_DIR})
 
 # Линковка
