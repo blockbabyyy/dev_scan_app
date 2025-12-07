@@ -45,26 +45,19 @@ find_package(benchmark CONFIG REQUIRED)
 
 # Исходные файлы проекта
 set(SOURCES
-    src/main.cpp
-    src/generators/TestDataGenerator.cpp
-    src/generators/FileType.cpp
-    src/generators/ContainerWrapper.cpp
-    
+    src/generator/Generator.cpp
 )
 
 # Заголовочные файлы
 set(HEADERS
-    include/generators/TestDataGenerator.hpp
-    include/generators/FileType.hpp
-    include/generators/ContainerWrapper.hpp
-  
+    include/generator/Generator.h
 )
 
 # Исполняемый файл
-add_executable(RegexBench main.cpp)
+add_executable(RegexBench main.cpp ${SOURCES} ${HEADERS})
 
 # Подключаем *корневую* директорию заголовков vcpkg (например, C:/vcpkg/installed/x64-windows/include)
-target_include_directories(RegexBench PRIVATE ${HYPERSCAN_INCLUDE_DIR})
+target_include_directories(RegexBench PRIVATE ${HYPERSCAN_INCLUDE_DIR}  ${CMAKE_SOURCE_DIR}/include)
 
 # Линковка
 target_link_libraries(RegexBench PRIVATE

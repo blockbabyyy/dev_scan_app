@@ -4,13 +4,17 @@
 #include <filesystem>
 #include <re2/re2.h>
 #include <boost/regex.hpp>
-#include <boost/algorithm/string/replace.hpp> // для экранирования спецсимволов в boost
+#include <boost/algorithm/string/replace.hpp> // ??? ????????????? ???????????? ? boost
 #include <regex>
 #include <hs/hs.h> // Hyperscan
 
+#include "generator/Generator.h"
+
+
+
 namespace fs = std::filesystem;
 
-// Сигнатуры для проверки (magic bytes)
+// ????????? ??? ???????? (magic bytes)
 const std::string pdf_header = "%PDF";
 const std::string doc_header = "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1";
 const std::string png_header = "\x89PNG\r\n\x1A\n";
@@ -20,10 +24,10 @@ const std::string rar5_header = "\x52\x61\x72\x21\x1A\x07\x01\x00";
 
 // RE2 (Google)
 bool check_file_signature_re2(const std::string& file_path, const std::string& signature, size_t size, re2::RE2::Options& opt) {
-    re2::RE2 regex("^" + signature, opt); // ^ - обязательно начало файла
+    re2::RE2 regex("^" + signature, opt); // ^ - ??????????? ?????? ?????
     std::ifstream file(file_path, std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "Ошибка открытия файла (RE2): " << file_path << std::endl;
+        std::cerr << "?????? ???????? ????? (RE2): " << file_path << std::endl;
         return false;
     }
 
@@ -35,9 +39,9 @@ bool check_file_signature_re2(const std::string& file_path, const std::string& s
     return RE2::PartialMatch(data, regex);
 }
 
-// Boost.Regex: тут надо экранировать спецсимволы вручную, т.к. escape нет
+// Boost.Regex: ??? ???? ???????????? ??????????? ???????, ?.?. escape ???
 bool check_file_signature_boost(const std::string& file_path, const std::string& signature, size_t size) {
-    // Экранирую все спецсимволы boost-овским replace_all (см. доку boost::regex)
+    // ????????? ??? ??????????? boost-?????? replace_all (??. ???? boost::regex)
     std::string escaped_sig = signature;
     boost::replace_all(escaped_sig, "\\", "\\\\");
     boost::replace_all(escaped_sig, "^", "\\^");
@@ -58,7 +62,7 @@ bool check_file_signature_boost(const std::string& file_path, const std::string&
 
     std::ifstream file(file_path, std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "Ошибка открытия файла (Boost.Regex): " << file_path << std::endl;
+        std::cerr << "?????? ???????? ????? (Boost.Regex): " << file_path << std::endl;
         return false;
     }
 
@@ -70,9 +74,9 @@ bool check_file_signature_boost(const std::string& file_path, const std::string&
     return boost::regex_search(data, regex);
 }
 
-// std::regex: почти то же самое, что и boost, но другой синтаксис
+// std::regex: ????? ?? ?? ?????, ??? ? boost, ?? ?????? ?????????
 bool check_file_signature_std(const std::string& file_path, const std::string& signature, size_t size) {
-    // Экранирую спецсимволы вручную (см. ECMAScript синтаксис)
+    // ????????? ??????????? ??????? (??. ECMAScript ?????????)
     std::string escaped_sig = signature;
     std::string specials = R"(\^.$|()[]*+?{})";
     for (char c : specials) {
@@ -89,7 +93,7 @@ bool check_file_signature_std(const std::string& file_path, const std::string& s
 
     std::ifstream file(file_path, std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "Ошибка открытия файла (std::regex): " << file_path << std::endl;
+        std::cerr << "?????? ???????? ????? (std::regex): " << file_path << std::endl;
         return false;
     }
 
@@ -102,58 +106,58 @@ bool check_file_signature_std(const std::string& file_path, const std::string& s
 }
 
 bool check_file_signature_hs(const std::string& file_path, const std::string& signature, size_t size) {
-    hs_database_t* database = nullptr; // Указатель на скомпилированную базу данных регулярных выражений
-    hs_compile_error_t* compile_err; // Указатель на ошибку компиляции
-    hs_scratch_t* scratch = nullptr; // Указатель на область памяти для выполнения поиска
+    hs_database_t* database = nullptr; // ????????? ?? ???????????????? ???? ?????? ?????????? ?????????
+    hs_compile_error_t* compile_err; // ????????? ?? ?????? ??????????
+    hs_scratch_t* scratch = nullptr; // ????????? ?? ??????? ?????? ??? ?????????? ??????
 
-    std::string pattern = "^" + signature; // ^ - обязательно начало файла
+    std::string pattern = "^" + signature; // ^ - ??????????? ?????? ?????
     if (hs_compile(pattern.c_str(), HS_FLAG_DOTALL, HS_MODE_BLOCK, nullptr, &database, &compile_err) != HS_SUCCESS) {
-        std::cerr << "Ошибка компиляции шаблона Hyperscan: " << compile_err->message << std::endl;
+        std::cerr << "?????? ?????????? ??????? Hyperscan: " << compile_err->message << std::endl;
         hs_free_compile_error(compile_err);
         return false;
     }
 
     if (hs_alloc_scratch(database, &scratch) != HS_SUCCESS) {
-        std::cerr << "Ошибка выделения памяти для Hyperscan." << std::endl;
+        std::cerr << "?????? ????????? ?????? ??? Hyperscan." << std::endl;
         hs_free_database(database);
         return false;
     }
 
     std::ifstream file(file_path, std::ios::binary);
     if (!file.is_open()) {
-        std::cerr << "Ошибка открытия файла (Hyperscan): " << file_path << std::endl;
+        std::cerr << "?????? ???????? ????? (Hyperscan): " << file_path << std::endl;
         hs_free_scratch(scratch);
         hs_free_database(database);
         return false;
-	}
+    }
     std::vector<char> buffer(size);
-	file.read(buffer.data(), size);
+    file.read(buffer.data(), size);
     file.close();
-    
+
     bool matched = false;
 
-	// hs_scan требует callback-функцию для обработки совпадений
-    auto on_match = [](unsigned int id,                     // номер совпавшего шаблона
-		               unsigned long long from,             // смещение начала совпадения
-		               unsigned long long to,              // смещение конца совпадения
-		               unsigned int flags,                  // флаги совпадения
-                       void* context) -> int {
-        bool* matched_ptr = static_cast<bool*>(context);
-        *matched_ptr = true;
-        return 0; // Продолжаем поиск
-    };
+    // hs_scan ??????? callback-??????? ??? ????????? ??????????
+    auto on_match = [](unsigned int id,                     // ????? ?????????? ???????
+        unsigned long long from,             // ???????? ?????? ??????????
+        unsigned long long to,              // ???????? ????? ??????????
+        unsigned int flags,                  // ????? ??????????
+        void* context) -> int {
+            bool* matched_ptr = static_cast<bool*>(context);
+            *matched_ptr = true;
+            return 0; // ?????????? ?????
+        };
 
     if (hs_scan(database, buffer.data(), size, 0, scratch, on_match, &matched) != HS_SUCCESS) {
-        std::cerr << "Ошибка сканирования файла Hyperscan." << std::endl;
+        std::cerr << "?????? ???????????? ????? Hyperscan." << std::endl;
     }
     hs_free_scratch(scratch);
     hs_free_database(database);
-	return matched;
+    return matched;
 
 }
-// Основная функция подсчёта файлов по сигнатурам для всех трёх regex-движков
+// ???????? ??????? ???????? ?????? ?? ?????????? ??? ???? ???? regex-???????
 void count_files(const std::string& directory, re2::RE2::Options& opt) {
-    // Счётчики для каждого движка (ИСПРАВИТЬ docx на doc)
+    // ???????? ??? ??????? ?????? (????????? docx ?? doc)
     int pdf_count_re2 = 0, docx_count_re2 = 0, png_count_re2 = 0, rar_count_re2 = 0, other_count_re2 = 0;
     int pdf_count_boost = 0, docx_count_boost = 0, png_count_boost = 0, rar_count_boost = 0, other_count_boost = 0;
     int pdf_count_std = 0, docx_count_std = 0, png_count_std = 0, rar_count_std = 0, other_count_std = 0;
@@ -170,7 +174,7 @@ void count_files(const std::string& directory, re2::RE2::Options& opt) {
                 else if (check_file_signature_std(file_path, doc_header, 8)) { docx_count_std++; matched_std = true; }
                 else if (check_file_signature_std(file_path, png_header, 8)) { png_count_std++; matched_std = true; }
                 else if (check_file_signature_std(file_path, rar4_header, 7) ||
-                         check_file_signature_std(file_path, rar5_header, 8)) {
+                    check_file_signature_std(file_path, rar5_header, 8)) {
                     rar_count_std++; matched_std = true;
                 }
                 else { other_count_std++; }
@@ -214,7 +218,7 @@ void count_files(const std::string& directory, re2::RE2::Options& opt) {
                 const std::string file_path = entry.path().string();
 
                 // hyperscan
-                bool matched_hs= false;
+                bool matched_hs = false;
                 if (check_file_signature_boost(file_path, pdf_header, 4)) { pdf_count_hs++; matched_hs = true; }
                 else if (check_file_signature_hs(file_path, doc_header, 8)) { docx_count_hs++; matched_hs = true; }
                 else if (check_file_signature_hs(file_path, png_header, 8)) { png_count_hs++; matched_hs = true; }
@@ -228,10 +232,10 @@ void count_files(const std::string& directory, re2::RE2::Options& opt) {
 
     }
     catch (const fs::filesystem_error& ex) {
-        std::cerr << "Ошибка файловой системы: " << ex.what() << std::endl;
+        std::cerr << "?????? ???????? ???????: " << ex.what() << std::endl;
     }
 
-    // Выводим результаты для каждого движка отдельно
+    // Statistics
     std::cout << "===== RE2 Results =====" << std::endl;
     std::cout << "PDF: " << pdf_count_re2 << "\nDOC: " << docx_count_re2 << "\nPNG: " << png_count_re2
         << "\nRAR: " << rar_count_re2 << "\nOther: " << other_count_re2 << std::endl;
@@ -252,15 +256,15 @@ void count_files(const std::string& directory, re2::RE2::Options& opt) {
 int main() {
     re2::RE2::Options options;
     options.set_encoding(re2::RE2::Options::EncodingLatin1);
-    std::string directory = R"(C:\projects\test_auto\data)"; // путь к папке с файлами для теста
+    std::string directory = R"(C:\projects\test_auto\data)"; // ???? ? ????? ? ??????? ??? ?????
 
     try {
         if (!fs::exists(directory)) {
-            std::cerr << "Директория не существует: " << directory << std::endl;
+            std::cerr << "Указанная директория не существует: " << directory << std::endl;
             return 1;
         }
         if (!fs::is_directory(directory)) {
-            std::cerr << "Путь не является директорией: " << directory << std::endl;
+            std::cerr << "Указанный путь не является директорией: " << directory << std::endl;
             return 1;
         }
         count_files(directory, options);
@@ -269,5 +273,19 @@ int main() {
         std::cerr << "Ошибка: " << ex.what() << std::endl;
         return 1;
     }
+
+
+	UnstructuredFileGenerator generator(100, UnstructuredFileGenerator::ContainerType::ZIP);
+	generator.generate("output_container.zip");
+	auto stats = generator.getStats();
+	std::cout << "File generation completed. Stats:" << std::endl;
+	for (const auto& entry : stats.fileCount) {
+		std::cout << entry.first << ": " << entry.second << std::endl;
+	}
+
+
+
+
+
     return 0;
 }
