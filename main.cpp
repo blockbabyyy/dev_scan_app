@@ -253,10 +253,95 @@ void count_files(const std::string& directory, re2::RE2::Options& opt) {
         << "\nRAR: " << rar_count_hs << "\nOther: " << other_count_hs << std::endl;
 }
 
+bool check_signature_in_data(const std::string& data, const std::string& signature) {
+    re2::RE2::Options opt;
+    opt.set_encoding(re2::RE2::Options::EncodingLatin1);
+    re2::RE2 regex("^" + signature, opt);
+
+    re2::StringPiece data_piece(data.data(), data.size());
+    return RE2::PartialMatch(data_piece, regex);
+}
+
+void count_png_pdf_in_generated_file_re2() {
+    // Конкретный путь к файлу
+    const std::string file_path = R"(C:\projects\dev_scan_app\out\build\x64-Debug\output_container.zip)";
+
+    // Сигнатуры файлов
+    const std::string pdf_header = "%PDF";
+    const std::string png_header = "\x89PNG\r\n\x1A\n";
+
+    std::ifstream file(file_path, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "Ошибка открытия файла: " << file_path << std::endl;
+        return;
+    }
+
+    // Читаем весь файл в память
+    file.seekg(0, std::ios::end);
+    size_t file_size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    std::vector<char> buffer(file_size);
+    file.read(buffer.data(), file_size);
+    file.close();
+
+    // Используем RE2 для поиска
+    re2::RE2::Options opt;
+    opt.set_encoding(re2::RE2::Options::EncodingLatin1);
+
+    int pdf_count = 0;
+    int png_count = 0;
+
+    // Создаем регулярные выражения
+    re2::RE2 pdf_regex(pdf_header, opt);
+    re2::RE2 png_regex(png_header, opt);
+
+    re2::StringPiece data_piece(buffer.data(), file_size);
+
+    // Подсчет PDF файлов
+    size_t pos = 0;
+    while (pos < file_size) {
+        re2::StringPiece match_result;
+        if (RE2::FindAndConsume(&data_piece, pdf_regex, &match_result)) {
+            pdf_count++;
+            // Сдвигаем позицию после найденной сигнатуры
+            pos = match_result.data() - buffer.data() + match_result.size();
+            data_piece = re2::StringPiece(buffer.data() + pos, file_size - pos);
+        }
+        else {
+            break;
+        }
+    }
+
+    // Восстанавливаем data_piece для поиска PNG
+    data_piece = re2::StringPiece(buffer.data(), file_size);
+    pos = 0;
+
+    // Подсчет PNG файлов
+    while (pos < file_size) {
+        re2::StringPiece match_result;
+        if (RE2::FindAndConsume(&data_piece, png_regex, &match_result)) {
+            png_count++;
+            // Сдвигаем позицию после найденной сигнатуры
+            pos = match_result.data() - buffer.data() + match_result.size();
+            data_piece = re2::StringPiece(buffer.data() + pos, file_size - pos);
+        }
+        else {
+            break;
+        }
+    }
+
+    std::cout << "===== Анализ сгенерированного файла (RE2) =====" << std::endl;
+    std::cout << "Путь к файлу: " << file_path << std::endl;
+    std::cout << "PDF файлов найдено: " << pdf_count << std::endl;
+    std::cout << "PNG файлов найдено: " << png_count << std::endl;
+    std::cout << "===============================================" << std::endl;
+}
+
 int main() {
     re2::RE2::Options options;
     options.set_encoding(re2::RE2::Options::EncodingLatin1);
-    std::string directory = R"(C:\projects\test_auto\data)"; // ???? ? ????? ? ??????? ??? ?????
+    std::string directory = R"(C:\projects\dev_scan_app\data)"; // ???? ? ????? ? ??????? ??? ?????
 
     try {
         if (!fs::exists(directory)) {
@@ -282,10 +367,8 @@ int main() {
 	for (const auto& entry : stats.fileCount) {
 		std::cout << entry.first << ": " << entry.second << std::endl;
 	}
-
-
-
-
+    auto path = R"("C:\projects\dev_scan_app\out\build\x64-Debug\output_container.zip")";
+    count_png_pdf_in_generated_file_re2();
 
     return 0;
 }

@@ -2,6 +2,7 @@
 #include <fstream>
 #include <chrono>
 #include <iostream>
+#include <cstring>
 
 UnstructuredFileGenerator::UnstructuredFileGenerator(uint64_t targetSizeMB,
     ContainerType containerType)
@@ -24,7 +25,7 @@ bool UnstructuredFileGenerator::generate(const std::string& outputPath) {
         generateFiles();
         createContainer();
         cleanup();
-        return true;        
+        return true;
     }
     catch (...) {
         cleanup();
@@ -76,19 +77,17 @@ void UnstructuredFileGenerator::initializeSignatures() {
 }
 
 void UnstructuredFileGenerator::generateFiles() {
-    // Используем допустимые типы для uniform_int_distribution на MSVC:
-    // индексы и байты генерируем как int, затем явно приводим к нужному типу
-    std::uniform_int_distribution<int> signatureDist(0, static_cast<int>(signatures.size() - 1));
-    std::uniform_int_distribution<uint32_t> sizeDist(20, 1024 * 10); // 20 байт - 10KB
+    std::uniform_int_distribution<size_t> signatureDist(0, signatures.size() - 1);
+    std::uniform_int_distribution<int> sizeDist(20, 1024 * 10); // 20 байт - 10KB
 
     while (currentSize < targetSize) {
         // Выбираем случайную сигнатуру
-        int indexInt = signatureDist(rng);
-        size_t index = static_cast<size_t>(indexInt);
+        size_t index = signatureDist(rng);
         const auto& sig = signatures[index];
 
-        // Генерируем случайный размер файла
-        uint32_t fileSize = sig.signature.size() + sizeDist(rng);
+        // Генерируем случайный размер файла (минимум сигнатура + 20 байт)
+        uint32_t minSize = static_cast<uint32_t>(sig.signature.size() + 20);
+        uint32_t fileSize = std::max(minSize, minSize + static_cast<uint32_t>(sizeDist(rng)));
 
         // Создаем файл
         std::string filename = "file_" + std::to_string(stats.fileCount.size()) + "." + sig.extension;
@@ -148,55 +147,259 @@ void UnstructuredFileGenerator::createBinContainer() {
     }
 }
 
+// Простая реализация CRC32 для ZIP
+uint32_t UnstructuredFileGenerator::calculateCRC32(const std::vector<uint8_t>& data) {
+    static uint32_t table[256];
+    static bool initialized = false;
+
+    if (!initialized) {
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t crc = i;
+            for (int j = 0; j < 8; j++) {
+                if (crc & 1) {
+                    crc = (crc >> 1) ^ 0xEDB88320;
+                }
+                else {
+                    crc >>= 1;
+                }
+            }
+            table[i] = crc;
+        }
+        initialized = true;
+    }
+
+    uint32_t crc = 0xFFFFFFFF;
+    for (const auto& byte : data) {
+        crc = (crc >> 8) ^ table[(crc & 0xFF) ^ byte];
+    }
+    return crc ^ 0xFFFFFFFF;
+}
+
+struct ZipEntryInfo {
+    std::string fileName;
+    uint32_t crc32;
+    uint32_t compressedSize;
+    uint32_t uncompressedSize;
+    uint32_t localHeaderOffset;
+    uint16_t fileNameLength;
+};
+
 void UnstructuredFileGenerator::createZipContainer() {
     std::ofstream container(outputPath, std::ios::binary);
     if (!container) {
         throw std::runtime_error("Failed to create ZIP container file");
     }
 
-    // Записываем сигнатуру ZIP файла
-    const uint8_t zipHeader[] = { 0x50, 0x4B, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-    container.write(reinterpret_cast<const char*>(zipHeader), sizeof(zipHeader));
+    std::vector<ZipEntryInfo> entries;
+    uint32_t offset = 0;
 
+    // Создаем каждый файл как отдельную запись в ZIP
     for (const auto& entry : fs::directory_iterator(tempDir)) {
         if (entry.is_regular_file()) {
-            // Local file header
-            const uint8_t localHeader[] = {
-                0x50, 0x4B, 0x03, 0x04, // Signature
-                0x0A, 0x00,             // Version needed
-                0x00, 0x00,             // General purpose bit flag
-                0x00, 0x00,             // Compression method (STORED)
-                0x00, 0x00,             // Last mod file time
-                0x00, 0x00,             // Last mod file date
-                0x00, 0x00, 0x00, 0x00, // CRC32 (не проверяется для STORED)
-                0x00, 0x00, 0x00, 0x00, // Compressed size
-                0x00, 0x00, 0x00, 0x00, // Uncompressed size
-                0x00, 0x00,             // File name length
-                0x00, 0x00              // Extra field length
-            };
+            // Читаем содержимое файла
+            std::ifstream file(entry.path(), std::ios::binary | std::ios::ate);
+            if (!file) continue;
 
-            container.write(reinterpret_cast<const char*>(localHeader), sizeof(localHeader));
+            std::streamsize fileSize = file.tellg();
+            file.seekg(0, std::ios::beg);
 
-            // Имя файла
+            std::vector<uint8_t> fileData(fileSize);
+            file.read(reinterpret_cast<char*>(fileData.data()), fileSize);
+            file.close();
+
+            // Вычисляем CRC32
+            uint32_t crc32 = calculateCRC32(fileData);
+
+            // Имя файла в ZIP
             std::string fileName = entry.path().filename().string();
-            uint16_t fileNameLength = static_cast<uint16_t>(fileName.length());
-            container.write(reinterpret_cast<const char*>(&fileNameLength), sizeof(fileNameLength) - 1);
-            container.write(fileName.c_str(), fileName.length());
 
-            // Размер файла
-            uint32_t fileSize = static_cast<uint32_t>(fs::file_size(entry.path()));
-            container.seekp(-8, std::ios::cur); // Перемещаемся к месту записи размеров
-            container.write(reinterpret_cast<const char*>(&fileSize), sizeof(fileSize)); // Compressed size
-            container.write(reinterpret_cast<const char*>(&fileSize), sizeof(fileSize)); // Uncompressed size
-            container.seekp(0, std::ios::end); // Возвращаемся в конец
+            // Сохраняем информацию для центральной директории
+            ZipEntryInfo entryInfo;
+            entryInfo.fileName = fileName;
+            entryInfo.crc32 = crc32;
+            entryInfo.compressedSize = static_cast<uint32_t>(fileSize);
+            entryInfo.uncompressedSize = static_cast<uint32_t>(fileSize);
+            entryInfo.localHeaderOffset = offset;
+            entryInfo.fileNameLength = static_cast<uint16_t>(fileName.length());
 
-            // Содержимое файла
-            std::ifstream file(entry.path(), std::ios::binary);
-            if (file) {
-                container << file.rdbuf();
+            entries.push_back(entryInfo);
+
+            // Local file header
+            std::vector<uint8_t> localHeader;
+
+            // Signature
+            localHeader.insert(localHeader.end(), { 0x50, 0x4B, 0x03, 0x04 });
+
+            // Version needed to extract (2.0)
+            localHeader.insert(localHeader.end(), { 0x14, 0x00 });
+
+            // General purpose bit flag (0)
+            localHeader.insert(localHeader.end(), { 0x00, 0x00 });
+
+            // Compression method (0 = STORED)
+            localHeader.insert(localHeader.end(), { 0x00, 0x00 });
+
+            // Last mod file time (00:00:00)
+            localHeader.insert(localHeader.end(), { 0x00, 0x00 });
+
+            // Last mod file date (01.01.1980)
+            localHeader.insert(localHeader.end(), { 0x21, 0x00 });
+
+            // CRC-32
+            for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+                localHeader.push_back(reinterpret_cast<const uint8_t*>(&crc32)[i]);
             }
+
+            // Compressed size
+            uint32_t compressedSize = static_cast<uint32_t>(fileSize);
+            for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+                localHeader.push_back(reinterpret_cast<const uint8_t*>(&compressedSize)[i]);
+            }
+
+            // Uncompressed size
+            uint32_t uncompressedSize = static_cast<uint32_t>(fileSize);
+            for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+                localHeader.push_back(reinterpret_cast<const uint8_t*>(&uncompressedSize)[i]);
+            }
+
+            // File name length
+            uint16_t fileNameLength = static_cast<uint16_t>(fileName.length());
+            for (size_t i = 0; i < sizeof(uint16_t); ++i) {
+                localHeader.push_back(reinterpret_cast<const uint8_t*>(&fileNameLength)[i]);
+            }
+
+            // Extra field length (0)
+            localHeader.insert(localHeader.end(), { 0x00, 0x00 });
+
+            // Write local header
+            container.write(reinterpret_cast<const char*>(localHeader.data()), localHeader.size());
+            offset += static_cast<uint32_t>(localHeader.size());
+
+            // Write file name
+            container.write(fileName.c_str(), fileName.length());
+            offset += static_cast<uint32_t>(fileName.length());
+
+            // Write file data
+            container.write(reinterpret_cast<const char*>(fileData.data()), fileData.size());
+            offset += static_cast<uint32_t>(fileData.size());
         }
     }
+
+    // Записываем центральную директорию
+    uint32_t centralDirStart = offset;
+    uint32_t centralDirSize = 0;
+
+    for (const auto& entry : entries) {
+        std::vector<uint8_t> centralHeader;
+
+        // Signature
+        centralHeader.insert(centralHeader.end(), { 0x50, 0x4B, 0x01, 0x02 });
+
+        // Version made by
+        centralHeader.insert(centralHeader.end(), { 0x14, 0x00 });
+
+        // Version needed to extract
+        centralHeader.insert(centralHeader.end(), { 0x14, 0x00 });
+
+        // General purpose bit flag
+        centralHeader.insert(centralHeader.end(), { 0x00, 0x00 });
+
+        // Compression method
+        centralHeader.insert(centralHeader.end(), { 0x00, 0x00 });
+
+        // Last mod file time
+        centralHeader.insert(centralHeader.end(), { 0x00, 0x00 });
+
+        // Last mod file date
+        centralHeader.insert(centralHeader.end(), { 0x21, 0x00 });
+
+        // CRC-32
+        for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+            centralHeader.push_back(reinterpret_cast<const uint8_t*>(&entry.crc32)[i]);
+        }
+
+        // Compressed size
+        for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+            centralHeader.push_back(reinterpret_cast<const uint8_t*>(&entry.compressedSize)[i]);
+        }
+
+        // Uncompressed size
+        for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+            centralHeader.push_back(reinterpret_cast<const uint8_t*>(&entry.uncompressedSize)[i]);
+        }
+
+        // File name length
+        for (size_t i = 0; i < sizeof(uint16_t); ++i) {
+            centralHeader.push_back(reinterpret_cast<const uint8_t*>(&entry.fileNameLength)[i]);
+        }
+
+        // Extra field length
+        centralHeader.insert(centralHeader.end(), { 0x00, 0x00 });
+
+        // File comment length
+        centralHeader.insert(centralHeader.end(), { 0x00, 0x00 });
+
+        // Disk number start
+        centralHeader.insert(centralHeader.end(), { 0x00, 0x00 });
+
+        // Internal file attributes
+        centralHeader.insert(centralHeader.end(), { 0x00, 0x00 });
+
+        // External file attributes
+        centralHeader.insert(centralHeader.end(), { 0x00, 0x00, 0x00, 0x00 });
+
+        // Relative offset of local header
+        for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+            centralHeader.push_back(reinterpret_cast<const uint8_t*>(&entry.localHeaderOffset)[i]);
+        }
+
+        // Write central directory header
+        container.write(reinterpret_cast<const char*>(centralHeader.data()), centralHeader.size());
+
+        // Write file name
+        container.write(entry.fileName.c_str(), entry.fileName.length());
+
+        centralDirSize += static_cast<uint32_t>(centralHeader.size() + entry.fileName.length());
+    }
+
+    // End of central directory record
+    std::vector<uint8_t> endRecord;
+
+    // Signature
+    endRecord.insert(endRecord.end(), { 0x50, 0x4B, 0x05, 0x06 });
+
+    // Number of this disk
+    endRecord.insert(endRecord.end(), { 0x00, 0x00 });
+
+    // Number of the disk with the start of the central directory
+    endRecord.insert(endRecord.end(), { 0x00, 0x00 });
+
+    // Total number of entries in the central directory on this disk
+    uint16_t entryCount = static_cast<uint16_t>(entries.size());
+    for (size_t i = 0; i < sizeof(uint16_t); ++i) {
+        endRecord.push_back(reinterpret_cast<const uint8_t*>(&entryCount)[i]);
+    }
+
+    // Total number of entries in the central directory
+    for (size_t i = 0; i < sizeof(uint16_t); ++i) {
+        endRecord.push_back(reinterpret_cast<const uint8_t*>(&entryCount)[i]);
+    }
+
+    // Size of the central directory
+    for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+        endRecord.push_back(reinterpret_cast<const uint8_t*>(&centralDirSize)[i]);
+    }
+
+    // Offset of start of central directory
+    for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+        endRecord.push_back(reinterpret_cast<const uint8_t*>(&centralDirStart)[i]);
+    }
+
+    // ZIP file comment length
+    endRecord.insert(endRecord.end(), { 0x00, 0x00 });
+
+    // Write end of central directory record
+    container.write(reinterpret_cast<const char*>(endRecord.data()), endRecord.size());
 }
 
 void UnstructuredFileGenerator::createPcapContainer() {
@@ -216,31 +419,46 @@ void UnstructuredFileGenerator::createPcapContainer() {
     };
     container.write(reinterpret_cast<const char*>(globalHeader), sizeof(globalHeader));
 
+    uint32_t packetCounter = 0;
     for (const auto& entry : fs::directory_iterator(tempDir)) {
         if (entry.is_regular_file()) {
-            uint32_t fileSize = fs::file_size(entry.path());
+            uint32_t fileSize = static_cast<uint32_t>(fs::file_size(entry.path()));
 
             // Packet header
-            const uint8_t packetHeader[] = {
-                0x00, 0x00, 0x00, 0x00, // Timestamp seconds
-                0x00, 0x00, 0x00, 0x00, // Timestamp microseconds
-                0x00, 0x00, 0x00, 0x00, // Captured packet length
-                0x00, 0x00, 0x00, 0x00  // Original packet length
-            };
+            std::vector<uint8_t> packetHeader;
 
-            container.write(reinterpret_cast<const char*>(packetHeader), sizeof(packetHeader));
+            // Timestamp seconds
+            uint32_t ts_sec = packetCounter;
+            for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+                packetHeader.push_back(reinterpret_cast<const uint8_t*>(&ts_sec)[i]);
+            }
 
-            // Записываем размер в заголовок пакета
-            container.seekp(-8, std::ios::cur);
-            container.write(reinterpret_cast<const char*>(&fileSize), sizeof(fileSize)); // Captured length
-            container.write(reinterpret_cast<const char*>(&fileSize), sizeof(fileSize)); // Original length
-            container.seekp(0, std::ios::end);
+            // Timestamp microseconds
+            uint32_t ts_usec = 0;
+            for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+                packetHeader.push_back(reinterpret_cast<const uint8_t*>(&ts_usec)[i]);
+            }
+
+            // Captured packet length
+            for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+                packetHeader.push_back(reinterpret_cast<const uint8_t*>(&fileSize)[i]);
+            }
+
+            // Original packet length
+            for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+                packetHeader.push_back(reinterpret_cast<const uint8_t*>(&fileSize)[i]);
+            }
+
+            // Write packet header
+            container.write(reinterpret_cast<const char*>(packetHeader.data()), packetHeader.size());
 
             // Содержимое файла как payload
             std::ifstream file(entry.path(), std::ios::binary);
             if (file) {
                 container << file.rdbuf();
             }
+
+            packetCounter++;
         }
     }
 }

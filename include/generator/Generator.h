@@ -1,3 +1,4 @@
+
 #include <string>
 #include <map>
 #include <cstdint>
@@ -67,5 +68,8 @@ private:
 
     // Очистка временных файлов
     void cleanup();
+
+    // Вспомогательные функции для ZIP
+    uint32_t calculateCRC32(const std::vector<uint8_t>& data);
 };
 
