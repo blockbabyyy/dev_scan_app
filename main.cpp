@@ -36,7 +36,7 @@ struct ScanStats {
     void print(const std::string& engine_name) const {
         std::cout << "===== " << engine_name << " Results =====" << std::endl;
         std::cout << "PDF: " << pdf << "\nDOC: " << doc << "\nPNG: " << png
-            << "\nRAR: " << rar << "\nOther: " << other << std::endl;
+            << "\nRAR: " << rar << "\nOther: " << other << "\nTotal: " << pdf+doc+png+rar+other << std::endl;
     }
 };
 
@@ -254,11 +254,23 @@ int main() {
     std::string directory = R"(C:\projects\dev_scan_app\input)";
     ScanStats stats_std, stats_re2, stats_boost, stats_hs;
 
+	GenStats gen_stats;
+
     try {
         // Проверки пути
         if (!fs::exists(directory) || !fs::is_directory(directory)) {
             std::cerr << "Папка не найдена: " << directory << std::endl;
             return 1;
+        }
+       
+        bool is_gen_required = fs::is_empty(directory);
+        
+        if (is_gen_required) {
+            std::cout << "Input directory is empty. Generating dataset..." << std::endl;
+            DataSetGenerator generator;
+            // Генерируем 200 МБ файлов в папку
+            gen_stats = generator.generate(directory, 400, DataSetGenerator::ContainerType::FOLDER);
+            gen_stats.print();
         }
 
 		hs_scanner.prepare(); // подготовка Hyperscan

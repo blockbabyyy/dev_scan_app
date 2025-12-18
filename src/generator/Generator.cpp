@@ -4,6 +4,227 @@
 #include <iostream>
 #include <cstring>
 
+// Словарь для текстовых файлов
+const std::vector<std::string> DataSetGenerator::dictionary = {
+    // HTML/XML тэги
+    "<div>", "<span>", "class=", "id=", "href=", "<html>", "<body>", "<script>",
+    "<?xml", "<root>", "<item>", "version=", "encoding=", "UTF-8",
+    // общие слова
+    "lorem", "ipsum", "dolor", "sit", "amet", "consectetur", "adipiscing", "elit",
+    "the", "and", "is", "in", "at", "of", "to", "for", "with", "on",
+    // Ключевые слова кода
+    "function", "return", "var", "const", "if", "else", "for", "while",
+    // Обманки
+    "%PDF-", "PK", "Rar!", "PNG", "JFIF", "Exif", // Ловушки в тексте
+    "user@example.com", "admin@localhost", "http://", "https://"
+};
+
+
+void DataSetGenerator::update_stats(GenStats& stats, const std::string& ext) {
+    stats.total_files++;
+
+    if (ext == ".pdf") stats.pdf++;
+    else if (ext == ".doc") stats.doc++; // Старый Word
+    else if (ext == ".zip" || ext == ".docx") stats.zip++; // DOCX это тоже ZIP
+    else if (ext == ".png") stats.png++;
+    else if (ext == ".rar") stats.rar++;
+    else stats.other++;
+}
+
+
+DataSetGenerator::DataSetGenerator() {
+    std::random_device rd;
+    rng.seed(rd());
+
+    // Инициализация поддерживаемых типов
+    // Текстовые
+    file_types.push_back({ ".txt",  "", true });
+    file_types.push_back({ ".html", "", true }); // Можно добавить <!DOCTYPE html>
+    file_types.push_back({ ".xml",  "", true });
+    file_types.push_back({ ".json", "", true });
+    file_types.push_back({ ".eml",  "", true }); // Email
+
+    // Бинарные (Документы)
+    file_types.push_back({ ".pdf",  "\x25\x50\x44\x46", false }); // %PDF
+    file_types.push_back({ ".doc",  "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", false }); // По сути все офисные, надо лезть внутрь
+    // DOCX формально это ZIP, но дадим ему сигнатуру ZIP
+    file_types.push_back({ ".docx", "\x50\x4B\x03\x04", false });
+
+    // Медиа
+    file_types.push_back({ ".png",  "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A", false });
+    file_types.push_back({ ".jpg",  "\xFF\xD8\xFF", false });
+    file_types.push_back({ ".bmp",  "\x42\x4D", false });
+    file_types.push_back({ ".mp3",  "\x49\x44\x33", false }); // ID3 tag
+    file_types.push_back({ ".mkv",  "\x1A\x45\xDF\xA3", false });
+
+    // Архивы
+    file_types.push_back({ ".zip",  "\x50\x4B\x03\x04", false });
+    file_types.push_back({ ".rar",  "\x52\x61\x72\x21\x1A\x07\x00", false });
+};
+
+GenStats DataSetGenerator::generate(const std::string& output_path, size_t total_size_mb,
+    ContainerType type) {
+
+    size_t target_size_bytes = total_size_mb * 1024 * 1024;
+    GenStats stats;
+
+    switch (type) {
+        case ContainerType::BIN: /*in progress*/;
+        case ContainerType::FOLDER: generate_folder(output_path, target_size_bytes, stats);
+        case ContainerType::ZIP: /*in progress*/;
+        case ContainerType::PCAP: /*in progress*/;
+    }
+    
+    stats.total_bytes = target_size_bytes;
+    return stats;
+};
+
+
+void DataSetGenerator::generate_content(std::ostream& out, size_t size, const FileType& type) {
+    // 1. Пишем сигнатуру (если есть)
+    if (!type.signature.empty()) {
+        out.write(type.signature.data(), type.signature.size());
+    }
+
+    size_t remaining = (size > type.signature.size()) ? (size - type.signature.size()) : 0;
+    if (remaining == 0) return;
+
+    // 2. Заполняем тело
+    if (type.is_text) {
+        if (type.extension == ".json") fill_json(out, remaining);
+        else if (type.extension == ".eml") fill_email(out, remaining);
+        else fill_text(out, remaining);
+    }
+    else {
+        fill_binary(out, remaining, type.signature);
+    }
+}
+
+void DataSetGenerator::generate_folder(const std::string& dir, size_t totalBytes, GenStats& stats) {
+
+    if (!fs::exists(dir)) fs::create_directories(dir);
+    size_t currentBytes = 0;
+    int index = 0;
+    std::uniform_int_distribution<int> typeDist(0, file_types.size() - 1);
+    std::discrete_distribution<> sizeDist({ 70, 20, 10 });
+
+    while (currentBytes < totalBytes) {
+        const auto& ftype = file_types[typeDist(rng)];
+
+        // Размер
+        size_t fsize = 0;
+        int cat = sizeDist(rng);
+        if (cat == 0) fsize = std::uniform_int_distribution<size_t>(1024, 100 * 1024)(rng);
+        else if (cat == 1) fsize = std::uniform_int_distribution<size_t>(100 * 1024, 5 * 1024 * 1024)(rng);
+        else fsize = std::uniform_int_distribution<size_t>(5 * 1024 * 1024, 25 * 1024 * 1024)(rng);
+
+        if (currentBytes + fsize > totalBytes + (10 * 1024 * 1024)) fsize = (totalBytes > currentBytes) ? totalBytes - currentBytes : 1024;
+        if (fsize == 0) fsize = 1024;
+
+        std::string fname = dir + "/file_" + std::to_string(index++) + ftype.extension;
+        std::ofstream ofs(fname, std::ios::binary);
+        if (ofs) {
+            generate_content(ofs, fsize, ftype);
+            update_stats(stats, ftype.extension); // <-- Считаем файл
+            currentBytes += fsize;
+        }
+
+        // Прогресс
+        if (index % 50 == 0) std::cout << "\rGenerating: " << (currentBytes / 1024 / 1024) << " MB" << std::flush;
+    }
+    std::cout << std::endl;
+}
+
+void DataSetGenerator::fill_text(std::ostream& out, size_t size) {
+    std::uniform_int_distribution<int> wordIdx(0, dictionary.size() - 1);
+    std::string buffer;
+    buffer.reserve(4096);
+
+    while (size > 0) {
+        const std::string& word = dictionary[wordIdx(rng)];
+
+        // Формируем кусок
+        std::string chunk = word + " ";
+
+        // Если кусок больше, чем осталось места - обрезаем его
+        if (chunk.size() > size) {
+            chunk.resize(size);
+        }
+
+        buffer += chunk;
+
+        // Сбрасываем буфер на диск, если он заполнился или если это финал
+        if (buffer.size() >= 4096 || buffer.size() == size) {
+            out.write(buffer.data(), buffer.size());
+
+            // Защита от переполнения:
+            if (size >= buffer.size()) {
+                size -= buffer.size();
+            }
+            else {
+                size = 0; // На всякий случай, хотя логика выше должна предотвратить
+            }
+
+            buffer.clear();
+        }
+    }
+}
+
+void DataSetGenerator::fill_json(std::ostream& out, size_t size) {
+    out << "{\"data\": [";
+    size_t written = 10;
+
+    // Генерируем псевдо-JSON
+    while (size > written + 2) {
+        std::string val = "\"" + dictionary[std::uniform_int_distribution<int>(0, dictionary.size() - 1)(rng)] + "\",";
+        if (val.size() > size - written - 2) break;
+        out.write(val.data(), val.size());
+        written += val.size();
+    }
+    out << "]}";
+}
+
+void DataSetGenerator::fill_email(std::ostream& out, size_t size) {
+    std::string header =
+        "Date: Mon, 16 Dec 2024 10:00:00 +0000\r\n"
+        "From: generator <test@domain.com>\r\n"
+        "To: user <user@local.host>\r\n"
+        "Subject: Automated Test Data\r\n"
+        "MIME-Version: 1.0\r\n\r\n";
+
+    out.write(header.data(), std::min(size, header.size()));
+    size_t remaining = (size > header.size()) ? size - header.size() : 0;
+
+    fill_text(out, remaining); // Тело письма - просто текст
+}
+
+void DataSetGenerator::fill_binary(std::ostream& out, size_t size, const std::string& signatureToAvoid) {
+    // Буфер 4КБ
+    std::vector<char> buffer(4096);
+    std::uniform_int_distribution<int> byteDist(0, 255);
+
+    // Генерируем 1 блок шума
+    for (auto& b : buffer) b = static_cast<char>(byteDist(rng));
+
+    // Иногда вставляем байты, похожие на сигнатуру PDF или ZIP, но битые
+    if (buffer.size() > 10) {
+        buffer[10] = 0x50; buffer[11] = 0x4B; buffer[12] = 0x00; buffer[13] = 0x00; // Fake ZIP
+        buffer[50] = 0x25; buffer[51] = 0x50; buffer[52] = 0x44; buffer[53] = 0x46; // Fake PDF
+    }
+
+    size_t totalWritten = 0;
+    while (totalWritten < size) {
+        size_t toWrite = std::min(size - totalWritten, buffer.size());
+
+        // Немного меняем буфер каждый раз (XOR), чтобы не был идеальный копипаст (против дедупликации)
+        buffer[totalWritten % 256] ^= 0xFF;
+
+        out.write(buffer.data(), toWrite);
+        totalWritten += toWrite;
+    }
+}
+
+/*
 UnstructuredFileGenerator::UnstructuredFileGenerator(uint64_t targetSizeMB,
     ContainerType containerType)
     : targetSize(targetSizeMB * 1024 * 1024),
@@ -468,3 +689,4 @@ void UnstructuredFileGenerator::cleanup() {
         fs::remove_all(tempDir);
     }
 }
+*/
