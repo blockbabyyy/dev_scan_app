@@ -18,49 +18,29 @@ namespace fs = std::filesystem;
 
 // Статистика
 struct ScanStats {
-    // Документы и Архивы
-    int pdf = 0;
-    int office_ole = 0;
-    int zip_docx = 0; // ZIP + DOCX/XLSX/PPTX
-    int rar = 0;
-
-    // Медиа
-    int png = 0;
-    int jpg = 0;
-    int gif = 0;
-    int bmp = 0;
-    int mkv = 0;
-    int mp3 = 0;
-
-    // Текст
-    int html = 0;
-    int xml = 0;
-    int json = 0;
-    int eml = 0;
-
+    int pdf = 0; int office_ole = 0; int zip_docx = 0; int rar = 0;
+    int png = 0; int jpg = 0; int gif = 0; int bmp = 0; int mkv = 0; int mp3 = 0;
+    int html = 0; int xml = 0; int json = 0; int eml = 0;
     int unknown = 0;
 
     void print(const std::string& engine_name) const {
         std::cout << "===== " << engine_name << " Results =====" << std::endl;
-
-        std::cout << "[Docs & Archives]" << std::endl;
-        std::cout << "  PDF: " << pdf << " | OLE: " << office_ole
-            << " | ZIP: " << zip_docx << " | RAR: " << rar << std::endl;
-
-        std::cout << "[Media]" << std::endl;
-        std::cout << "  PNG: " << png << " | JPG: " << jpg << " | GIF: " << gif
-            << " | BMP: " << bmp << " | MKV: " << mkv << " | MP3: " << mp3 << std::endl;
-
-        std::cout << "[Text/Code]" << std::endl;
-        std::cout << "  HTML: " << html << " | XML: " << xml
-            << " | JSON: " << json << " | EML: " << eml << std::endl;
-
-        std::cout << "[Other]" << std::endl;
-        std::cout << "  Unknown: " << unknown << std::endl;
+        std::cout << "[Docs & Archives]\n"
+            << "  PDF: " << pdf << " | OLE: " << office_ole
+            << " | ZIP: " << zip_docx << " | RAR: " << rar << "\n";
+        std::cout << "[Media]\n"
+            << "  PNG: " << png << " | JPG: " << jpg << " | GIF: " << gif
+            << " | BMP: " << bmp << " | MKV: " << mkv << " | MP3: " << mp3 << "\n";
+        std::cout << "[Text]\n"
+            << "  HTML: " << html << " | XML: " << xml
+            << " | JSON: " << json << " | EML: " << eml << "\n";
+        std::cout << "[Other]\n  Unknown: " << unknown << std::endl;
 		std::cout << "-------------------------------" << std::endl;
-        std::cout << "  Total Files: " << (pdf + office_ole + zip_docx + rar +
-            png + jpg + gif + bmp + mkv + mp3 +
-			html + xml + json + eml + unknown) << std::endl;
+        std::cout << "Total: "
+            << (pdf + office_ole + zip_docx + rar +
+                png + jpg + gif + bmp + mkv + mp3 +
+                html + xml + json + eml + unknown)
+			<< std::endl;
         std::cout << "========================================" << std::endl;
     }
 };
@@ -85,57 +65,52 @@ class StdScanner : public Scanner {
     public:
         StdScanner() {
             auto f = std::regex::optimize;
-            auto f_icase = std::regex::optimize | std::regex::icase;
-            // Компиляция
-            pdf.assign("^" + Sig::Bin::PDF, f);
-		    office_old.assign("^" + Sig::Bin::OLE, f);
-            zip.assign("^" + Sig::Bin::ZIP, f);
-		    rar4.assign("^" + Sig::Bin::RAR4, f);
-		    rar5.assign("^" + Sig::Bin::RAR5, f);
+            auto fi = std::regex::optimize | std::regex::icase;
 
-            png.assign("^" + Sig::Bin::PNG, f);
-			jpg.assign("^" + Sig::Bin::JPG, f);
-			gif.assign("^" + Sig::Bin::GIF, f);
-			bmp.assign("^" + Sig::Bin::BMP, f);
-			mkv.assign("^" + Sig::Bin::MKV, f);
-            mp3.assign("^" + Sig::Bin::MP3, f);
-            
-            
-			html.assign(Sig::Text::HTML, f_icase);
-			xml.assign(Sig::Text::XML, f_icase);
-            json.assign(Sig::Text::JSON, f_icase);
-			eml.assign(Sig::Text::EML, f_icase);
-            
+            // Бинарные: ^ + байты
+            r_pdf.assign("^" + Sig::Bin::PDF, f);
+            r_ole.assign("^" + Sig::Bin::OLE, f);
+            r_zip.assign("^" + Sig::Bin::ZIP, f);
+            r_rar4.assign("^" + Sig::Bin::RAR4, f);
+            r_rar5.assign("^" + Sig::Bin::RAR5, f);
+
+            r_png.assign("^" + Sig::Bin::PNG, f);
+            r_jpg.assign("^" + Sig::Bin::JPG, f);
+            r_gif.assign("^" + Sig::Bin::GIF, f);
+            r_bmp.assign("^" + Sig::Bin::BMP, f);
+            r_mkv.assign("^" + Sig::Bin::MKV, f);
+            r_mp3.assign("^" + Sig::Bin::MP3, f);
+
+            // Текстовые: ^ + паттерн
+            r_html.assign("^" + Sig::Text::HTML, fi);
+            r_xml.assign("^" + Sig::Text::XML, fi);
+            r_json.assign("^" + Sig::Text::JSON, f);
+            r_eml.assign("^" + Sig::Text::EML, fi);
         }
 
         std::string name() const override { return "std::regex"; }
-
-        void scan(const char* data, size_t size, ScanStats& stats) override {
-            std::cmatch m;
-            
-            if (std::regex_search(data, data + size, m, pdf)) stats.pdf++;
-            else if (std::regex_search(data, data + size, m, office_old)) stats.office_ole++;
-            else if (std::regex_search(data, data + size, m, zip)) stats.zip_docx++;
-            else if (std::regex_search(data, data + size, m, rar4) ||
-                     std::regex_search(data, data + size, m, rar5)) stats.rar++;
-            else if (std::regex_search(data, data + size, m, png)) stats.png++;
-            else if (std::regex_search(data, data + size, m, jpg)) stats.jpg++;
-            else if (std::regex_search(data, data + size, m, gif)) stats.gif++;
-            else if (std::regex_search(data, data + size, m, bmp)) stats.bmp++;
-            else if (std::regex_search(data, data + size, m, mkv)) stats.mkv++;
-            else if (std::regex_search(data, data + size, m, mp3)) stats.mp3++;
-            else if (std::regex_search(data, data + size, m, mp3)) stats.mp3++;
-       
-            else if (std::regex_search(data, data + size, m, html)) stats.html++;
-            else if (std::regex_search(data, data + size, m, xml)) stats.xml++;
-			else if (std::regex_search(data, data + size, m, json)) stats.json++;
-			else if (std::regex_search(data, data + size, m, eml)) stats.eml++;
-      
-			else stats.unknown++;
-            
+        void scan(const char* d, size_t s, ScanStats& st) override {
+            std::cmatch m; auto end = d + s;
+            if (std::regex_search(d, end, m, r_pdf)) st.pdf++;
+            else if (std::regex_search(d, end, m, r_ole)) st.office_ole++;
+            else if (std::regex_search(d, end, m, r_zip)) st.zip_docx++;
+            else if (std::regex_search(d, end, m, r_rar4) || std::regex_search(d, end, m, r_rar5)) st.rar++;
+            else if (std::regex_search(d, end, m, r_png)) st.png++;
+            else if (std::regex_search(d, end, m, r_jpg)) st.jpg++;
+            else if (std::regex_search(d, end, m, r_gif)) st.gif++;
+            else if (std::regex_search(d, end, m, r_bmp)) st.bmp++;
+            else if (std::regex_search(d, end, m, r_mkv)) st.mkv++;
+            else if (std::regex_search(d, end, m, r_mp3)) st.mp3++;
+            else if (std::regex_search(d, end, m, r_html)) st.html++;
+            else if (std::regex_search(d, end, m, r_xml)) st.xml++;
+            else if (std::regex_search(d, end, m, r_json)) st.json++;
+            else if (std::regex_search(d, end, m, r_eml)) st.eml++;
+            else st.unknown++;
         }
     private:
-        std::regex pdf, office_old, zip, rar4, rar5, png, jpg, gif, bmp, mkv, mp3, html, xml, json, eml;
+        std::regex r_pdf, r_ole, r_zip, r_rar4, r_rar5;
+        std::regex r_png, r_jpg, r_gif, r_bmp, r_mkv, r_mp3;
+        std::regex r_html, r_xml, r_json, r_eml;
 
         
 		
@@ -144,118 +119,104 @@ class StdScanner : public Scanner {
 class Re2Scanner : public Scanner {
     public:
         Re2Scanner() {
-            // Опции для бинарников
-            re2::RE2::Options options;
-            options.set_encoding(re2::RE2::Options::EncodingLatin1);
-            options.set_log_errors(false);
+            re2::RE2::Options ob; ob.set_encoding(re2::RE2::Options::EncodingLatin1); ob.set_log_errors(false);
+            re2::RE2::Options ot = ob; ot.set_case_sensitive(false);
 
-			// Опции для текстовых (регистронезависимые)
-            re2::RE2::Options opt_text = options;
-            opt_text.set_case_sensitive(false);
-            // Компиляция
-            pdf = std::make_unique<re2::RE2>("^" + Sig::Bin::PDF, options);
-            office_old = std::make_unique<re2::RE2>("^" + Sig::Bin::OLE, options);
-            zip = std::make_unique<re2::RE2>("^" + Sig::Bin::ZIP, options);
-            rar4 = std::make_unique<re2::RE2>("^" + Sig::Bin::RAR4, options);
-            rar5 = std::make_unique<re2::RE2>("^" + Sig::Bin::RAR4, options);
+            r_pdf = std::make_unique<re2::RE2>("^" + Sig::Bin::PDF, ob);
+            r_ole = std::make_unique<re2::RE2>("^" + Sig::Bin::OLE, ob);
+            r_zip = std::make_unique<re2::RE2>("^" + Sig::Bin::ZIP, ob);
+            r_rar4 = std::make_unique<re2::RE2>("^" + Sig::Bin::RAR4, ob);
+            r_rar5 = std::make_unique<re2::RE2>("^" + Sig::Bin::RAR5, ob);
 
-            png = std::make_unique<re2::RE2>("^" + Sig::Bin::PNG, options);
-            jpg = std::make_unique<re2::RE2>("^" + Sig::Bin::JPG, options);
-            gif = std::make_unique<re2::RE2>("^" + Sig::Bin::GIF, options);
-            bmp = std::make_unique<re2::RE2>("^" + Sig::Bin::BMP, options);
-            mkv = std::make_unique<re2::RE2>("^" + Sig::Bin::MKV, options);
-            mp3 = std::make_unique<re2::RE2>("^" + Sig::Bin::MP3, options);
+            r_png = std::make_unique<re2::RE2>("^" + Sig::Bin::PNG, ob);
+            r_jpg = std::make_unique<re2::RE2>("^" + Sig::Bin::JPG, ob);
+            r_gif = std::make_unique<re2::RE2>("^" + Sig::Bin::GIF, ob);
+            r_bmp = std::make_unique<re2::RE2>("^" + Sig::Bin::BMP, ob);
+            r_mkv = std::make_unique<re2::RE2>("^" + Sig::Bin::MKV, ob);
+            r_mp3 = std::make_unique<re2::RE2>("^" + Sig::Bin::MP3, ob);
 
-            // 4. Инициализация ТЕКСТОВЫХ паттернов (уже содержат ^)
-            // HTML и XML и EML ищем без учета регистра (opt_text)
-            html = std::make_unique<re2::RE2>(Sig::Text::HTML, opt_text);
-            xml = std::make_unique<re2::RE2>(Sig::Text::XML, opt_text);
-            eml = std::make_unique<re2::RE2>(Sig::Text::EML, opt_text);
-
-            // JSON обычно чувствителен к регистру (хотя для { это не важно), используем opt_bin
-            json = std::make_unique<re2::RE2>(Sig::Text::JSON, options);
+            r_html = std::make_unique<re2::RE2>("^" + Sig::Text::HTML, ot);
+            r_xml = std::make_unique<re2::RE2>("^" + Sig::Text::XML, ot);
+            r_json = std::make_unique<re2::RE2>("^" + Sig::Text::JSON, ob);
+            r_eml = std::make_unique<re2::RE2>("^" + Sig::Text::EML, ot);
 
         }
 
         std::string name() const override { return "Google RE2"; }
-
-        void scan(const char* data, size_t size, ScanStats& stats) override {
-            // RE2 требует StringPiece (легкая обертка)
-            re2::StringPiece piece(data, size);
-
-            // Проверки
-            if (RE2::PartialMatch(piece, *pdf)) stats.pdf++;
-            else if (RE2::PartialMatch(piece, *office_old)) stats.office_ole++;
-            else if (RE2::PartialMatch(piece, *zip)) stats.zip_docx++;
-            else if (RE2::PartialMatch(piece, *rar4) || RE2::PartialMatch(piece, *rar5)) stats.rar++;
-            else if (RE2::PartialMatch(piece, *png)) stats.png++;
-            else if (RE2::PartialMatch(piece, *jpg)) stats.jpg++;
-            else if (RE2::PartialMatch(piece, *gif)) stats.gif++;
-            else if (RE2::PartialMatch(piece, *bmp)) stats.bmp++;
-            else if (RE2::PartialMatch(piece, *mkv)) stats.mkv++;
-            else if (RE2::PartialMatch(piece, *mp3)) stats.mp3++;
-
-            // Текст
-            else if (RE2::PartialMatch(piece, *html)) stats.html++;
-            else if (RE2::PartialMatch(piece, *xml)) stats.xml++;
-			else if (RE2::PartialMatch(piece, *json)) stats.json++;
-            else if (RE2::PartialMatch(piece, *eml)) stats.eml++;
-            else stats.unknown++;
+        void scan(const char* d, size_t s, ScanStats& st) override {
+            re2::StringPiece p(d, s);
+            if (RE2::PartialMatch(p, *r_pdf)) st.pdf++;
+            else if (RE2::PartialMatch(p, *r_ole)) st.office_ole++;
+            else if (RE2::PartialMatch(p, *r_zip)) st.zip_docx++;
+            else if (RE2::PartialMatch(p, *r_rar4) || RE2::PartialMatch(p, *r_rar5)) st.rar++;
+            else if (RE2::PartialMatch(p, *r_png)) st.png++;
+            else if (RE2::PartialMatch(p, *r_jpg)) st.jpg++;
+            else if (RE2::PartialMatch(p, *r_gif)) st.gif++;
+            else if (RE2::PartialMatch(p, *r_bmp)) st.bmp++;
+            else if (RE2::PartialMatch(p, *r_mkv)) st.mkv++;
+            else if (RE2::PartialMatch(p, *r_mp3)) st.mp3++;
+            else if (RE2::PartialMatch(p, *r_html)) st.html++;
+            else if (RE2::PartialMatch(p, *r_xml)) st.xml++;
+            else if (RE2::PartialMatch(p, *r_json)) st.json++;
+            else if (RE2::PartialMatch(p, *r_eml)) st.eml++;
+            else st.unknown++;
         }
     private:
         //объекты класса re2::RE2 некопируемые + можно инициализировать отложенно
-        std::unique_ptr<re2::RE2> pdf, office_old, zip, rar4, rar5, png, jpg, gif, bmp, mkv, mp3, html, xml, json, eml;
+        std::unique_ptr<re2::RE2> r_pdf, r_ole, r_zip, r_rar4, r_rar5;
+        std::unique_ptr<re2::RE2> r_png, r_jpg, r_gif, r_bmp, r_mkv, r_mp3;
+        std::unique_ptr<re2::RE2> r_html, r_xml, r_json, r_eml;
 
 };
 
 class BoostScanner : public Scanner {
     public:
         BoostScanner() {
-            // Boost по умолчанию хорошо оптимизирован
-            pdf.assign("^" + Sig::Bin::PDF);
-            office_old.assign("^" + Sig::Bin::OLE);
-            zip.assign("^" + Sig::Bin::ZIP);
-            rar4.assign("^" + Sig::Bin::RAR4);
-            rar5.assign("^" + Sig::Bin::RAR5);
+			auto flags_bin = boost::regex::perl; // Бинарные - чувствительны к регистру
+			auto flags_text = boost::regex::perl | boost::regex::icase; // Текстовые - нечувствительны к регистру
 
-            png.assign("^" + Sig::Bin::PNG);
-            jpg.assign("^" + Sig::Bin::JPG);
-            gif.assign("^" + Sig::Bin::GIF);
-            bmp.assign("^" + Sig::Bin::BMP);
-            mkv.assign("^" + Sig::Bin::MKV);
-            mp3.assign("^" + Sig::Bin::MP3);
+            r_pdf.assign("\\A" + Sig::Bin::PDF, flags_bin);
+            r_ole.assign("\\A" + Sig::Bin::OLE, flags_bin);
+            r_zip.assign("\\A" + Sig::Bin::ZIP, flags_bin);
+            r_rar4.assign("\\A" + Sig::Bin::RAR4, flags_bin);
+            r_rar5.assign("\\A" + Sig::Bin::RAR5, flags_bin);
 
+            r_png.assign("\\A" + Sig::Bin::PNG, flags_bin);
+            r_jpg.assign("\\A" + Sig::Bin::JPG, flags_bin);
+            r_gif.assign("\\A" + Sig::Bin::GIF, flags_bin);
+            r_bmp.assign("\\A" + Sig::Bin::BMP, flags_bin);
+            r_mkv.assign("\\A" + Sig::Bin::MKV, flags_bin);
+            r_mp3.assign("\\A" + Sig::Bin::MP3, flags_bin);
 
-            html.assign(Sig::Text::HTML);
-            xml.assign(Sig::Text::XML);
-            json.assign(Sig::Text::JSON);
-            eml.assign(Sig::Text::EML);
+            r_html.assign("\\A" + Sig::Text::HTML, flags_text);
+            r_xml.assign("\\A" + Sig::Text::XML, flags_text);
+            r_json.assign("\\A" + Sig::Text::JSON, flags_bin);
+            r_eml.assign("\\A" + Sig::Text::EML, flags_text);
         }
 
         std::string name() const override { return "Boost.Regex"; }
-
-        void scan(const char* data, size_t size, ScanStats& stats) override {
-            // Boost тоже умеет работать с диапазоном итераторов (const char*)
-            if (boost::regex_search(data, data + size, pdf)) stats.pdf++;
-            else if (boost::regex_search(data, data + size, office_old)) stats.office_ole++;
-            else if (boost::regex_search(data, data + size, rar4) ||
-                boost::regex_search(data, data + size, rar5)) stats.rar++;
-            else if (boost::regex_search(data, data + size, png)) stats.png++;
-            else if (boost::regex_search(data, data + size, jpg)) stats.jpg++;
-            else if (boost::regex_search(data, data + size, gif)) stats.gif++;
-            else if (boost::regex_search(data, data + size, bmp)) stats.bmp++;
-            else if (boost::regex_search(data, data + size, mkv)) stats.mkv++;
-            else if (boost::regex_search(data, data + size, mp3)) stats.mp3++;
-
-            // Текст
-            else if (boost::regex_search(data, data + size, html)) stats.html++;
-            else if (boost::regex_search(data, data + size, xml)) stats.xml++;
-            else if (boost::regex_search(data, data + size, json)) stats.json++;
-            else if (boost::regex_search(data, data + size, eml)) stats.eml++;
-            else stats.unknown++;
+        void scan(const char* d, size_t s, ScanStats& st) override {
+            // Boost корректно работает с указателями
+            if (boost::regex_search(d, d + s, r_pdf)) st.pdf++;
+            else if (boost::regex_search(d, d + s, r_ole)) st.office_ole++;
+            else if (boost::regex_search(d, d + s, r_zip)) st.zip_docx++;
+            else if (boost::regex_search(d, d + s, r_rar4) || boost::regex_search(d, d + s, r_rar5)) st.rar++;
+            else if (boost::regex_search(d, d + s, r_png)) st.png++;
+            else if (boost::regex_search(d, d + s, r_jpg)) st.jpg++;
+            else if (boost::regex_search(d, d + s, r_gif)) st.gif++;
+            else if (boost::regex_search(d, d + s, r_bmp)) st.bmp++;
+            else if (boost::regex_search(d, d + s, r_mkv)) st.mkv++;
+            else if (boost::regex_search(d, d + s, r_mp3)) st.mp3++;
+            else if (boost::regex_search(d, d + s, r_html)) st.html++;
+            else if (boost::regex_search(d, d + s, r_xml)) st.xml++;
+            else if (boost::regex_search(d, d + s, r_json)) st.json++;
+            else if (boost::regex_search(d, d + s, r_eml)) st.eml++;
+            else st.unknown++;
         }
     private:
-        boost::regex pdf, office_old, zip, rar4, rar5, png, jpg, gif, bmp, mkv, mp3, html, xml, json, eml;;
+        boost::regex r_pdf, r_ole, r_zip, r_rar4, r_rar5;
+        boost::regex r_png, r_jpg, r_gif, r_bmp, r_mkv, r_mp3;
+        boost::regex r_html, r_xml, r_json, r_eml;
 };
 
 /* Перенесена в Signature.h
@@ -276,11 +237,10 @@ class HsScanner : public Scanner {
         HsScanner() {
             // Подготовка паттернов (нужно добавить ^ вручную для каждого)
             std::string p_pdf = Sig::raw_to_hex(Sig::Bin::PDF);
-            std::string p_office_old = Sig::raw_to_hex(Sig::Bin::OLE);
+            std::string p_ole = Sig::raw_to_hex(Sig::Bin::OLE);
             std::string p_zip = Sig::raw_to_hex(Sig::Bin::ZIP);
-            std::string p_rar4= Sig::raw_to_hex(Sig::Bin::RAR4);
+            std::string p_rar4 = Sig::raw_to_hex(Sig::Bin::RAR4);
             std::string p_rar5 = Sig::raw_to_hex(Sig::Bin::RAR5);
-
             std::string p_png = Sig::raw_to_hex(Sig::Bin::PNG);
             std::string p_jpg = Sig::raw_to_hex(Sig::Bin::JPG);
             std::string p_gif = Sig::raw_to_hex(Sig::Bin::GIF);
@@ -288,37 +248,43 @@ class HsScanner : public Scanner {
             std::string p_mkv = Sig::raw_to_hex(Sig::Bin::MKV);
             std::string p_mp3 = Sig::raw_to_hex(Sig::Bin::MP3);
 
-            const char* expressions[] = {
-                // Бинарные
-                p_pdf.c_str(), p_office_old.c_str(), p_zip.c_str(), p_rar4.c_str(), p_rar5.c_str(),
+
+            std::string p_html = "^" + Sig::Text::HTML;
+            std::string p_xml = "^" + Sig::Text::XML;
+            std::string p_json = "^" + Sig::Text::JSON;
+            std::string p_eml = "^" + Sig::Text::EML;
+            
+            const char* exprs[] = {
+                p_pdf.c_str(), p_ole.c_str(), p_zip.c_str(),
+                p_rar4.c_str(), p_rar5.c_str(), 
                 p_png.c_str(), p_jpg.c_str(), p_gif.c_str(), p_bmp.c_str(), p_mkv.c_str(), p_mp3.c_str(),
-                // Текстовые (берем напрямую из Signatures.h)
-                Sig::Text::HTML.c_str(), Sig::Text::XML.c_str(),
-                Sig::Text::JSON.c_str(), Sig::Text::EML.c_str()
+                p_html.c_str(), p_xml.c_str(), p_json.c_str(), p_eml.c_str()
             };
             unsigned int ids[] = {
-             ID_PDF, ID_OLE, ID_ZIP, ID_RAR4, ID_RAR5,  // внутренние id для HS
-             ID_PNG, ID_JPG, ID_GIF, ID_BMP, ID_MKV, ID_MP3,
-             ID_HTML, ID_XML, ID_JSON, ID_EML
+                ID_PDF, ID_OLE, ID_ZIP,
+                ID_RAR, ID_RAR,  
+                ID_PNG, ID_JPG, ID_GIF, ID_BMP, ID_MKV, ID_MP3,
+                ID_HTML, ID_XML, ID_JSON, ID_EML
             };
+
             std::vector<unsigned int> flags;
+
             // Для первых 10 (бинарных) ставим стандартные флаги
-            for (int i = 0; i < 10; ++i) {
-                flags.push_back(HS_FLAG_DOTALL);
-            }
+            for (int i = 0; i < 11; ++i) flags.push_back(HS_FLAG_DOTALL);
+
             // Для текстовых:
             // HTML, XML, EML - игнорируем регистр (CASELESS)
-            flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS); // HTML
-            flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS); // XML
-            flags.push_back(HS_FLAG_DOTALL);                    // JSON (скобки не имеют регистра)
-            flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS); // EML
+            flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8); // HTML
+            flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8); // XML
+            flags.push_back(HS_FLAG_DOTALL | HS_FLAG_UTF8);                    // JSON
+            flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8); // EML
 			
 
-            hs_compile_error_t* compile_err;
-            // Компилируем сразу все паттерны в одну базу
-            if (hs_compile_multi(expressions, flags.data(), ids, 5, HS_MODE_BLOCK, nullptr, &db, &compile_err) != HS_SUCCESS) {
-                std::cerr << "HS Compile Error: " << compile_err->message << std::endl;
-                hs_free_compile_error(compile_err);
+            hs_compile_error_t* err;
+            // Count = 15
+            if (hs_compile_multi(exprs, flags.data(), ids, 15, HS_MODE_BLOCK, nullptr, &db, &err) != HS_SUCCESS) {
+                std::cerr << "HS Compile Error: " << err->message << std::endl;
+                hs_free_compile_error(err);
                 db = nullptr;
             }
         }
@@ -337,49 +303,30 @@ class HsScanner : public Scanner {
         std::string name() const override { return "Hyperscan"; }
 
         void scan(const char* data, size_t size, ScanStats& stats) override {
-
-            if (!db) {
-                std::cerr << "[Error] Hyperscan DB not compiled!" << std::endl;
-                return;
-            }
-            if (!scratch) {
-
-                throw std::runtime_error("[Error] Hyperscan scratch space not allocated! Call prepare()!");
-            }
-
-			//if (!db || !scratch) return; // база не скомпилирована или память не выделена
-
-            int found_id = 0; 
-
-            // Лямбда функция обратного вызова
-            auto on_match = [](unsigned int id, unsigned long long from, unsigned long long to,
-                unsigned int flags, void* context) -> int {
-                    int* found_ptr = static_cast<int*>(context);
-                    *found_ptr = id;
-                    return 1; // возврат 1, чтобы остановить сканирование после первого совпадения
+            if (!db || !scratch) return;
+            int found_id = 0;
+            auto on_match = [](unsigned int id, unsigned long long, unsigned long long, unsigned int, void* ctx) {
+                *static_cast<int*>(ctx) = id; return 1;
                 };
-
             hs_scan(db, data, size, 0, scratch, on_match, &found_id);
 
-			if (found_id == 0) {
-                stats.unknown++;
-               
+            switch (found_id) {
+                case ID_PDF:  stats.pdf++; break;
+                case ID_OLE:  stats.office_ole++; break;
+                case ID_ZIP:  stats.zip_docx++; break;
+                case ID_RAR:  stats.rar++; break;
+                case ID_PNG:  stats.png++; break;
+                case ID_JPG:  stats.jpg++; break;
+                case ID_GIF:  stats.gif++; break;
+                case ID_BMP:  stats.bmp++; break;
+                case ID_MKV:  stats.mkv++; break;
+                case ID_MP3:  stats.mp3++; break;
+                case ID_HTML: stats.html++; break;
+                case ID_XML:  stats.xml++; break;
+                case ID_JSON: stats.json++; break;
+                case ID_EML:  stats.eml++; break;
+                default:      stats.unknown++; break;
             }
-            else if (found_id == ID_PDF) stats.pdf++;
-            else if (found_id == ID_OLE) stats.office_ole++;
-            else if (found_id == ID_ZIP) stats.zip_docx++;
-            else if (found_id == ID_RAR4 || found_id == ID_RAR5) stats.rar++;
-            else if (found_id == ID_PNG) stats.png++;
-            else if (found_id == ID_JPG) stats.jpg++;
-            else if (found_id == ID_GIF) stats.gif++;
-            else if (found_id == ID_BMP) stats.bmp++;
-            else if (found_id == ID_MKV) stats.mkv++;
-            else if (found_id == ID_MP3) stats.mp3++;
-            else if (found_id == ID_HTML) stats.html++;
-            else if (found_id == ID_XML) stats.xml++;
-            else if (found_id == ID_JSON) stats.json++;
-			else if (found_id == ID_EML) stats.eml++;
-            else stats.unknown++;
         }
 
     private:
@@ -388,7 +335,7 @@ class HsScanner : public Scanner {
 
         // Внутренние ID для Hyperscan callback
         enum {
-            ID_PDF = 1, ID_OLE, ID_ZIP, ID_RAR4, ID_RAR5,
+            ID_PDF = 1, ID_OLE, ID_ZIP, ID_RAR,
             ID_PNG, ID_JPG, ID_GIF, ID_BMP, ID_MKV, ID_MP3,
             ID_HTML, ID_XML, ID_JSON, ID_EML
         };

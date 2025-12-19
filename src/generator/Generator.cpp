@@ -75,7 +75,7 @@ DataSetGenerator::DataSetGenerator() {
     file_types.push_back({ ".html", "<html>", true }); // Добавим явную сигнатуру для простоты regex
     file_types.push_back({ ".xml",  "<?xml", true });
     file_types.push_back({ ".json", "{", true });      // JSON начинается с {
-    file_types.push_back({ ".eml",  "Date:", true });  // EML начинается с заголовка
+    file_types.push_back({ ".eml",  "", true });  // EML начинается с заголовка
 
     // --- DOCS ---
     file_types.push_back({ ".pdf",  Sig::Bin::PDF, false });
