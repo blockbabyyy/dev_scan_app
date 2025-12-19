@@ -1,8 +1,10 @@
 #include "generator/Generator.h"
+#include "Signatures.h"
 #include <fstream>
 #include <chrono>
 #include <iostream>
 #include <cstring>
+#include <sstream>
 
 // Словарь для текстовых файлов
 const std::vector<std::string> DataSetGenerator::dictionary = {
@@ -24,42 +26,80 @@ void DataSetGenerator::update_stats(GenStats& stats, const std::string& ext) {
     stats.total_files++;
 
     if (ext == ".pdf") stats.pdf++;
-    else if (ext == ".doc") stats.doc++; // Старый Word
-    else if (ext == ".zip" || ext == ".docx") stats.zip++; // DOCX это тоже ZIP
-    else if (ext == ".png") stats.png++;
+    else if (ext == ".doc" || ext == ".xls" || ext == ".ppt") stats.office_ole++;
+    else if (ext == ".docx" || ext == ".xlsx" || ext == ".pptx") stats.office_xml++;
+    else if (ext == ".zip") stats.zip++;
     else if (ext == ".rar") stats.rar++;
-    else stats.other++;
+    else if (ext == ".png") stats.png++;
+    else if (ext == ".jpg") stats.jpg++;
+    else if (ext == ".gif") stats.gif++;
+    else if (ext == ".bmp") stats.bmp++;
+    else if (ext == ".mkv") stats.mkv++;
+    else if (ext == ".mp3") stats.mp3++;
+    else if (ext == ".html") stats.html++;
+    else if (ext == ".xml") stats.xml++;
+    else if (ext == ".json") stats.json++;
+    else if (ext == ".eml") stats.eml++;
+    else if (ext == ".txt") stats.txt++;
 }
 
+// Простая таблица CRC32 для ZIP
+static uint32_t crc32_table[256];
+static bool crc_initialized = false;
+
+static void init_crc32() {
+    for (uint32_t i = 0; i < 256; i++) {
+        uint32_t c = i;
+        for (int j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >> 1)) : (c >> 1);
+        crc32_table[i] = c;
+    }
+    crc_initialized = true;
+}
+
+uint32_t DataSetGenerator::calculate_CRC32(const char* data, size_t length) {
+    if (!crc_initialized) init_crc32();
+    uint32_t c = 0xFFFFFFFF;
+    for (size_t i = 0; i < length; ++i) {
+        c = crc32_table[(c ^ (uint8_t)data[i]) & 0xFF] ^ (c >> 8);
+    }
+    return c ^ 0xFFFFFFFF;
+}
 
 DataSetGenerator::DataSetGenerator() {
     std::random_device rd;
     rng.seed(rd());
 
     // Инициализация поддерживаемых типов
-    // Текстовые
-    file_types.push_back({ ".txt",  "", true });
-    file_types.push_back({ ".html", "", true }); // Можно добавить <!DOCTYPE html>
-    file_types.push_back({ ".xml",  "", true });
-    file_types.push_back({ ".json", "", true });
-    file_types.push_back({ ".eml",  "", true }); // Email
+    // --- TEXT ---
+    file_types.push_back({ ".txt",  "", true }); // 
+    file_types.push_back({ ".html", "<html>", true }); // Добавим явную сигнатуру для простоты regex
+    file_types.push_back({ ".xml",  "<?xml", true });
+    file_types.push_back({ ".json", "{", true });      // JSON начинается с {
+    file_types.push_back({ ".eml",  "Date:", true });  // EML начинается с заголовка
 
-    // Бинарные (Документы)
-    file_types.push_back({ ".pdf",  "\x25\x50\x44\x46", false }); // %PDF
-    file_types.push_back({ ".doc",  "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", false }); // По сути все офисные, надо лезть внутрь
-    // DOCX формально это ZIP, но дадим ему сигнатуру ZIP
-    file_types.push_back({ ".docx", "\x50\x4B\x03\x04", false });
+    // --- DOCS ---
+    file_types.push_back({ ".pdf",  Sig::Bin::PDF, false });
+	// OLE (Old Office) - одна сигнатура на всех // ToDo: нужны более комплексные сигнатуры для старых офисов
+    file_types.push_back({ ".doc",  Sig::Bin::OLE, false });
+    file_types.push_back({ ".xls",  Sig::Bin::OLE, false });
+    file_types.push_back({ ".ppt",  Sig::Bin::OLE, false });
+	// ZIP-based (New Office) // ToDo: нужны более комплексные сигнатуры для новых офисов
+    file_types.push_back({ ".docx", Sig::Bin::ZIP, false });
+    file_types.push_back({ ".xlsx", Sig::Bin::ZIP, false });
+    file_types.push_back({ ".pptx", Sig::Bin::ZIP, false });
 
-    // Медиа
-    file_types.push_back({ ".png",  "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A", false });
-    file_types.push_back({ ".jpg",  "\xFF\xD8\xFF", false });
-    file_types.push_back({ ".bmp",  "\x42\x4D", false });
-    file_types.push_back({ ".mp3",  "\x49\x44\x33", false }); // ID3 tag
-    file_types.push_back({ ".mkv",  "\x1A\x45\xDF\xA3", false });
+    // --- MEDIA ---
+    file_types.push_back({ ".png",  Sig::Bin::PNG, false });
+    file_types.push_back({ ".jpg",  Sig::Bin::JPG, false });
+    file_types.push_back({ ".gif",  Sig::Bin::GIF, false });
+    file_types.push_back({ ".bmp",  Sig::Bin::BMP, false });
+    file_types.push_back({ ".mkv",  Sig::Bin::MKV, false });
+    file_types.push_back({ ".mp3",  Sig::Bin::MP3, false });
 
-    // Архивы
-    file_types.push_back({ ".zip",  "\x50\x4B\x03\x04", false });
-    file_types.push_back({ ".rar",  "\x52\x61\x72\x21\x1A\x07\x00", false });
+    // --- ARCHIVES ---
+    file_types.push_back({ ".zip",  Sig::Bin::ZIP, false });
+    file_types.push_back({ ".rar",  Sig::Bin::RAR4, false });
+	file_types.push_back({ ".rar",  Sig::Bin::RAR5, false });
 };
 
 GenStats DataSetGenerator::generate(const std::string& output_path, size_t total_size_mb,
@@ -69,10 +109,10 @@ GenStats DataSetGenerator::generate(const std::string& output_path, size_t total
     GenStats stats;
 
     switch (type) {
-        case ContainerType::BIN: /*in progress*/;
-        case ContainerType::FOLDER: generate_folder(output_path, target_size_bytes, stats);
-        case ContainerType::ZIP: /*in progress*/;
-        case ContainerType::PCAP: /*in progress*/;
+        case ContainerType::FOLDER: generate_folder(output_path, target_size_bytes, stats); break;
+        case ContainerType::ZIP: generate_zip(output_path, target_size_bytes, stats); break;
+        case ContainerType::PCAP: generate_pcap(output_path, target_size_bytes, stats); break;
+        case ContainerType::BIN: generate_bin(output_path, target_size_bytes, stats); break;
     }
     
     stats.total_bytes = target_size_bytes;
@@ -100,6 +140,7 @@ void DataSetGenerator::generate_content(std::ostream& out, size_t size, const Fi
     }
 }
 
+// Генераторы контейнеров
 void DataSetGenerator::generate_folder(const std::string& dir, size_t totalBytes, GenStats& stats) {
 
     if (!fs::exists(dir)) fs::create_directories(dir);
@@ -135,6 +176,173 @@ void DataSetGenerator::generate_folder(const std::string& dir, size_t totalBytes
     std::cout << std::endl;
 }
 
+void DataSetGenerator::generate_zip(const std::string& filename, size_t total_bytes, GenStats& stats) {
+    std::ofstream zip(filename, std::ios::binary);
+    size_t current_bytes = 0;
+    int index = 0;
+    std::vector<DataSetGenerator::ZipEntry> entries;
+    std::uniform_int_distribution<int> type_dist(0, file_types.size() - 1);
+
+    std::cout << "[ZIP] Generating uncompresased archive: " << filename << std::endl;
+
+    while (current_bytes < total_bytes) {
+        const auto& ftype = file_types[type_dist(rng)];
+        size_t fsize = std::uniform_int_distribution<size_t>(100, 200 * 1024)(rng); // Небольшие файлы для ZIP
+        std::string fname = "file_" + std::to_string(index++) + ftype.extension;
+
+        // Генерируем контент в память, чтобы посчитать CRC32
+        std::stringstream buffer;
+        generate_content(buffer, fsize, ftype);
+		update_stats(stats, ftype.extension);
+
+        std::string data = buffer.str();
+        uint32_t crc = calculate_CRC32(data.data(), data.size());
+
+        // Сохраняем метаданные
+        ZipEntry entry;
+        entry.name = fname;
+        entry.crc32 = crc;
+        entry.size = (uint32_t)data.size();
+        entry.offset = (uint32_t)zip.tellp();
+        entries.push_back(entry);
+
+        // Пишем Local File Header
+        // Сигнутура (0x04034b50)
+        uint32_t sig = 0x04034b50; zip.write((char*)&sig, 4);
+        uint16_t ver = 20; zip.write((char*)&ver, 2); // версия
+        uint16_t flg = 0;  zip.write((char*)&flg, 2); // флаги
+        uint16_t meth = 0; zip.write((char*)&meth, 2); // метод (0 = хранение)
+        uint16_t time = 0; zip.write((char*)&time, 2); // время
+        uint16_t date = 0; zip.write((char*)&date, 2); // дата
+        zip.write((char*)&entry.crc32, 4);
+        zip.write((char*)&entry.size, 4); // размер сжатого (если да)
+        zip.write((char*)&entry.size, 4); // несжатого
+        uint16_t name_len = (uint16_t)fname.size(); // длина имени
+        zip.write((char*)&name_len, 2);
+        uint16_t extra_len = 0; // длина доп. поля
+        zip.write((char*)&extra_len, 2);
+        zip.write(fname.c_str(), fname.size());
+
+        // Пишем данные
+        zip.write(data.data(), data.size());
+
+        current_bytes += data.size();
+    }
+
+    // Пишем Central Directory
+    uint32_t cd_start = (uint32_t)zip.tellp();
+    for (const auto& e : entries) {
+        uint32_t sig = 0x02014b50; zip.write((char*)&sig, 4);
+        uint16_t ver = 20; zip.write((char*)&ver, 2);
+        zip.write((char*)&ver, 2); // 
+        uint16_t flg = 0; zip.write((char*)&flg, 2);
+        uint16_t meth = 0; zip.write((char*)&meth, 2);
+        uint32_t dummy = 0; zip.write((char*)&dummy, 4);
+        zip.write((char*)&e.crc32, 4);
+        zip.write((char*)&e.size, 4);
+        zip.write((char*)&e.size, 4);
+        uint16_t nameLen = (uint16_t)e.name.size(); zip.write((char*)&nameLen, 2);
+        uint16_t extra = 0; zip.write((char*)&extra, 2);
+        zip.write((char*)&extra, 2); // Comment len
+        zip.write((char*)&extra, 2); // Disk start
+        zip.write((char*)&extra, 2); // Internal attr
+        uint32_t extAttr = 0; zip.write((char*)&extAttr, 4);
+        zip.write((char*)&e.offset, 4); // Local header offset
+        zip.write(e.name.c_str(), e.name.size());
+    }
+    uint32_t cd_size = (uint32_t)zip.tellp() - cd_start;
+
+    // End of Central Directory Record
+    uint32_t cd_sig_end = 0x06054b50; zip.write((char*)&cd_sig_end, 4);
+    uint16_t disk = 0; zip.write((char*)&disk, 2);
+    zip.write((char*)&disk, 2);
+    uint16_t entries_num = (uint16_t)entries.size();
+    zip.write((char*)&entries_num, 2); // Entries on this disk
+    zip.write((char*)&entries_num, 2); // Total entries
+    zip.write((char*)&cd_size, 4);
+    zip.write((char*)&cd_start, 4);
+    uint16_t comment_len = 0; zip.write((char*)&comment_len, 2);
+}
+
+void DataSetGenerator::generate_pcap(const std::string& filename, size_t total_bytes, GenStats& stats) {
+    std::ofstream pcap(filename, std::ios::binary);
+
+    // Global Header
+    uint32_t magic = 0xa1b2c3d4; pcap.write((char*)&magic, 4);
+    uint16_t verMaj = 2; pcap.write((char*)&verMaj, 2);
+    uint16_t verMin = 4; pcap.write((char*)&verMin, 2);
+    uint32_t zone = 0; pcap.write((char*)&zone, 4);
+    uint32_t sigfigs = 0; pcap.write((char*)&sigfigs, 4);
+    uint32_t snaplen = 65535; pcap.write((char*)&snaplen, 4);
+    uint32_t linktype = 1; // Ethernet
+    pcap.write((char*)&linktype, 4);
+
+    size_t currentBytes = 0;
+    std::uniform_int_distribution<int> typeDist(0, file_types.size() - 1);
+
+    std::cout << "[PCAP] Generating network traffic dump: " << filename << std::endl;
+
+    while (currentBytes < total_bytes) {
+        const auto& ftype = file_types[typeDist(rng)];
+        // В PCAP пакеты обычно небольшие, разобьем "файл" на 1-2 пакета или запишем целиком (jumbo frame style)
+        // Для теста регулярок лучше писать целиком как payload, чтобы сигнатура была непрерывной
+        size_t fsize = std::uniform_int_distribution<size_t>(64, 1500)(rng);
+
+        std::stringstream buffer;
+        generate_content(buffer, fsize, ftype);
+		update_stats(stats, ftype.extension);
+        std::string payload = buffer.str();
+
+        // Packet Header
+        uint32_t ts_sec = 0x657755AA; // Fake timestamp
+        uint32_t ts_usec = 0;
+        uint32_t incl_len = (uint32_t)payload.size(); // +14 байт Ethernet header если надо, но для regex неважно
+        uint32_t orig_len = incl_len;
+
+        pcap.write((char*)&ts_sec, 4);
+        pcap.write((char*)&ts_usec, 4);
+        pcap.write((char*)&incl_len, 4);
+        pcap.write((char*)&orig_len, 4);
+
+        // Payload (наш сгенерированный файл)
+        pcap.write(payload.data(), payload.size());
+
+        currentBytes += payload.size();
+    }
+}
+
+void DataSetGenerator::generate_bin(const std::string& filename, size_t totalBytes, GenStats& stats) {
+    std::ofstream bin(filename, std::ios::binary);
+    size_t currentBytes = 0;
+    std::uniform_int_distribution<int> typeDist(0, file_types.size() - 1);
+
+    std::cout << "[BIN] Generating custom binary dump: " << filename << std::endl;
+
+    while (currentBytes < totalBytes) {
+        const auto& ftype = file_types[typeDist(rng)];
+        size_t fsize = std::uniform_int_distribution<size_t>(1024, 1024 * 1024)(rng);
+
+        std::stringstream buffer;
+        generate_content(buffer, fsize, ftype);
+		update_stats(stats, ftype.extension);
+        std::string data = buffer.str();
+
+        // Проприетарный заголовок: [MAGIC 4B][TYPE 4B][SIZE 8B]
+        uint32_t magic = 0xDEADBEEF;
+        uint32_t type = 1;
+        uint64_t size = data.size();
+
+        bin.write((char*)&magic, 4);
+        bin.write((char*)&type, 4);
+        bin.write((char*)&size, 8);
+        bin.write(data.data(), data.size());
+
+        currentBytes += data.size();
+    }
+}
+
+
+// Стратегии заполнения
 void DataSetGenerator::fill_text(std::ostream& out, size_t size) {
     std::uniform_int_distribution<int> wordIdx(0, dictionary.size() - 1);
     std::string buffer;

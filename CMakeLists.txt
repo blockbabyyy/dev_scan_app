@@ -1,70 +1,86 @@
 cmake_minimum_required(VERSION 3.21)
-project(RegexBench)
 
-# Укажите путь к vcpkg ВРУЧНУЮ!!!
-# Замените C:/vcpkg на ваш реальный путь к директории vcpkg
+# ==============================================================================
+# 1. НАСТРОЙКА VCPKG (ЭТО ДОЛЖНО БЫТЬ ДО КОМАНДЫ project() !!!)
+# ==============================================================================
+
+# Укажите ваш путь к vcpkg
 set(VCPKG_ROOT "C:/vcpkg" CACHE STRING "Path to vcpkg root directory" FORCE)
+set(VCPKG_DEFAULT_TRIPLET "x64-windows" CACHE STRING "vcpkg triplet" FORCE)
 
-#  Укажите триплет (опционально)
-# Замените x64-windows, если вы используете другой (например, x86-windows, x64-windows-static)
-set(VCPKG_DEFAULT_TRIPLET "x64-windows" CACHE STRING "vcpkg triplet (e.g., x64-windows)" FORCE)
-
-# Указываем toolchain vcpkg до project(), используя заданный путь
+# Подключаем тулчейн vcpkg ПЕРЕД инициализацией проекта
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
-  set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-      CACHE STRING "Vcpkg toolchain file")
+    set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
+        CACHE STRING "Vcpkg toolchain file" FORCE)
 endif()
+
+# ==============================================================================
+# 2. ИНИЦИАЛИЗАЦИЯ ПРОЕКТА
+# ==============================================================================
+project(RegexBench)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-#  Поиск Hyperscan 
-# Используем переменные VCPKG_ROOT и VCPKG_DEFAULT_TRIPLET, заданные выше
+# ==============================================================================
+# 3. ПОИСК БИБЛИОТЕК
+# ==============================================================================
+
+# Hyperscan (Ручной поиск, т.к. официального конфига может не быть)
 find_path(HYPERSCAN_INCLUDE_DIR
-    NAMES hs/hs.h  # hs.h находится внутри поддиректории hs/
-    PATHS ${VCPKG_ROOT}/installed/${VCPKG_DEFAULT_TRIPLET}/include # Используем переменные
-    NO_DEFAULT_PATH # Искать ТОЛЬКО в указанных PATHS
+    NAMES hs/hs.h
+    PATHS "${VCPKG_ROOT}/installed/${VCPKG_DEFAULT_TRIPLET}/include"
+    NO_DEFAULT_PATH
 )
 
 find_library(HYPERSCAN_LIBRARY
-    NAMES hs # Имя библиотеки hs.lib
-    PATHS ${VCPKG_ROOT}/installed/${VCPKG_DEFAULT_TRIPLET}/lib # Используем переменные
-    NO_DEFAULT_PATH # Искать ТОЛЬКО в указанных PATHS
+    NAMES hs
+    PATHS "${VCPKG_ROOT}/installed/${VCPKG_DEFAULT_TRIPLET}/lib"
+    NO_DEFAULT_PATH
 )
 
-# Проверка, что оба компонента найдены
 if(NOT HYPERSCAN_INCLUDE_DIR OR NOT HYPERSCAN_LIBRARY)
-  message(FATAL_ERROR "Hyperscan headers или library не найдены. Убедитесь, что пакет hyperscan установлен через vcpkg в ${VCPKG_ROOT}/installed/${VCPKG_DEFAULT_TRIPLET}/ и используйте #include <hs/hs.h>.")
+    message(FATAL_ERROR "Hyperscan не найден! Проверьте путь: ${VCPKG_ROOT}/installed/${VCPKG_DEFAULT_TRIPLET}")
 endif()
 
-# Подключаем библиотеки через vcpkg/ find_package
-find_package(absl CONFIG REQUIRED)
+# Остальные библиотеки через vcpkg
+find_package(absl CONFIG REQUIRED) # Нужен для RE2
 find_package(RE2 CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS regex)
 find_package(benchmark CONFIG REQUIRED)
 
-# Исходные файлы проекта
+# ==============================================================================
+# 4. ФАЙЛЫ ПРОЕКТА
+# ==============================================================================
+
 set(SOURCES
+    main.cpp
     src/generator/Generator.cpp
 )
 
-# Заголовочные файлы
 set(HEADERS
     include/generator/Generator.h
+    include/Signatures.h 
 )
 
-# Исполняемый файл
-add_executable(RegexBench main.cpp ${SOURCES} ${HEADERS})
+# ==============================================================================
+# 5. СБОРКА И ЛИНКОВКА
+# ==============================================================================
 
-# Подключаем *корневую* директорию заголовков vcpkg (например, C:/vcpkg/installed/x64-windows/include)
-target_include_directories(RegexBench PRIVATE ${HYPERSCAN_INCLUDE_DIR}  ${CMAKE_SOURCE_DIR}/include)
+add_executable(RegexBench ${SOURCES} ${HEADERS})
 
-# Линковка
+# Подключаем папки заголовков
+target_include_directories(RegexBench PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"  # Чтобы работало #include "Signatures.h"
+    "${HYPERSCAN_INCLUDE_DIR}"     # Чтобы работало #include <hs/hs.h>
+)
+
+# Линкуем библиотеки
 target_link_libraries(RegexBench PRIVATE
-    #absl::absl
     re2::re2
     Boost::regex
-    ${HYPERSCAN_LIBRARY} # Линкуем найденную библиотеку Hyperscan
     benchmark::benchmark
     benchmark::benchmark_main
+    ${HYPERSCAN_LIBRARY}
+    # absl::absl  <-- Обычно подтягивается автоматически через RE2, но если будут ошибки линковки, раскомментируйте
 )
