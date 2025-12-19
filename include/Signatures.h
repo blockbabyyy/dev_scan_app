@@ -17,6 +17,19 @@ namespace Sig {
         const std::string BMP = "\x42\x4D";
         const std::string MKV = "\x1A\x45\xDF\xA3";
         const std::string MP3 = "\x49\x44\x33";
+
+
+        //вторичные сигнатуры для разделения офисных файлов
+        const std::string OLE_WORD = "WordDocument";
+        const std::string OLE_XL = "Workbook";
+        const std::string OLE_PPT = "PowerPoint Document";
+
+        // OpenXML Markers (Internal ZIP paths)
+        const std::string XML_WORD = "word/";
+        const std::string XML_XL = "xl/";
+        const std::string XML_PPT = "ppt/";
+
+
     }
 
     namespace Text {
@@ -33,10 +46,19 @@ namespace Sig {
 
     inline std::string raw_to_hex(const std::string& raw) {
         std::ostringstream ss;
-        ss << "^";
         for (unsigned char c : raw) {
             ss << "\\x" << std::hex << std::setw(2) << std::setfill('0') << (int)c;
         }
         return ss.str();
+    }
+
+	// Комплексная сигнатура: заголовок + любые символы + контент
+    inline std::string complex(const std::string& head_raw, const std::string& marker_raw) {
+        
+        std::string pattern = raw_to_hex(head_raw);
+        pattern += ".*";
+        pattern += raw_to_hex(marker_raw);
+
+        return pattern;
     }
 }

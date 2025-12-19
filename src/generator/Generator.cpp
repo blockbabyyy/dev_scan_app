@@ -135,6 +135,13 @@ void DataSetGenerator::generate_content(std::ostream& out, size_t size, const Fi
         else if (type.extension == ".eml") fill_email(out, remaining);
         else fill_text(out, remaining);
     }
+    else if (type.extension == ".doc") fill_ole(out, remaining, Sig::Bin::OLE_WORD);
+    else if (type.extension == ".xls") fill_ole(out, remaining, Sig::Bin::OLE_XL);
+    else if (type.extension == ".ppt") fill_ole(out, remaining, Sig::Bin::OLE_PPT);
+
+    else if (type.extension == ".docx") fill_openxml(out, remaining, Sig::Bin::XML_WORD);
+    else if (type.extension == ".xlsx") fill_openxml(out, remaining, Sig::Bin::XML_XL);
+    else if (type.extension == ".pptx") fill_openxml(out, remaining, Sig::Bin::XML_PPT);
     else {
         fill_binary(out, remaining, type.signature);
     }
@@ -431,6 +438,57 @@ void DataSetGenerator::fill_binary(std::ostream& out, size_t size, const std::st
         totalWritten += toWrite;
     }
 }
+
+void DataSetGenerator::fill_ole(std::ostream& out, size_t size, const std::string& marker) {
+    std::vector<char> buffer(512, 0);
+    // Заполним мусором
+    for (auto& c : buffer) c = rng() % 255;
+
+    // Вставляем маркер (например, "WordDocument") в случайное место заголовка
+    size_t pos = 100 + (rng() % 200);
+    if (pos + marker.size() < buffer.size()) {
+        std::memcpy(&buffer[pos], marker.data(), marker.size());
+    }
+
+    size_t toWrite = std::min(size, buffer.size());
+    out.write(buffer.data(), toWrite);
+
+    if (size > toWrite) {
+        fill_binary(out, size - toWrite, ""); // Остальное добиваем шумом
+    }
+}
+void DataSetGenerator::fill_openxml(std::ostream& out, size_t size, const std::string& marker) {
+    std::string internalFileName = marker + "core.xml"; // например word/core.xml
+
+    // Local File Header Signature
+    uint32_t sig = 0x04034b50;
+    out.write((char*)&sig, 4);
+
+    // Min version (20), Flags (0), Method (0 - Store)
+    char headerPart[] = {
+        0x14, 0x00, 0x00, 0x00, 0x00, 0x00, // Ver, Flags, Method
+        0x00, 0x00, 0x00, 0x00,             // Time, Date
+        0x00, 0x00, 0x00, 0x00,             // CRC32
+        0x00, 0x00, 0x00, 0x00,             // Comp Size
+        0x00, 0x00, 0x00, 0x00              // Uncomp Size
+    };
+    out.write(headerPart, sizeof(headerPart));
+
+    uint16_t nameLen = (uint16_t)internalFileName.size();
+    uint16_t extraLen = 0;
+    out.write((char*)&nameLen, 2);
+    out.write((char*)&extraLen, 2);
+
+    // Имя файла (САМОЕ ВАЖНОЕ ДЛЯ ДЕТЕКЦИИ)
+    out.write(internalFileName.data(), internalFileName.size());
+
+    // Данные файла
+    size_t headerSize = 4 + sizeof(headerPart) + 4 + internalFileName.size();
+    size_t remaining = (size > headerSize) ? size - headerSize : 0;
+
+    // Добиваем файл шумом (имитация содержимого XML и других файлов в архиве)
+    fill_binary(out, remaining, "");
+};
 
 /*
 UnstructuredFileGenerator::UnstructuredFileGenerator(uint64_t targetSizeMB,

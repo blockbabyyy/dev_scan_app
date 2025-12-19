@@ -114,76 +114,8 @@ class DataSetGenerator {
 		void fill_text(std::ostream& out, size_t size);
 		void fill_email(std::ostream& out, size_t size);
 		void fill_json(std::ostream& out, size_t size);
+		void fill_ole(std::ostream& out, size_t size, const std::string& marker);
+		void fill_openxml(std::ostream& out, size_t size, const std::string& marker);
 
         void update_stats(GenStats& stats, const std::string& ext);
 };
-
-
-
-/*
-class UnstructuredFileGenerator {
-public:
-    struct Stats {
-        std::map<std::string, int> fileCount;
-    };
-
-    enum class ContainerType {
-        BIN,
-        ZIP,
-        PCAP
-    };
-
-    // Конструктор с параметрами
-    explicit UnstructuredFileGenerator(uint64_t targetSizeMB = 400,
-        ContainerType containerType = ContainerType::BIN);
-
-    // Основной метод генерации
-    bool generate(const std::string& outputPath);
-
-    // Получение статистики
-    Stats getStats() const;
-
-    // Получение пути к контейнеру
-    std::string getContainerPath() const;
-
-private:
-    struct FileSignature {
-        std::string extension;
-        std::vector<uint8_t> signature;
-    };
-
-    uint64_t targetSize;
-    uint64_t currentSize;
-    ContainerType containerType;
-    std::string outputPath;
-    fs::path tempDir;
-    std::vector<FileSignature> signatures;
-    Stats stats;
-    std::mt19937 rng;
-
-    // Инициализация сигнатур
-    void initializeSignatures();
-
-    // Генерация файлов
-    void generateFiles();
-
-    // Создание контейнера
-    void createContainer();
-
-    // Создание бинарного контейнера
-    void createBinContainer();
-
-    // Создание ZIP контейнера
-    void createZipContainer();
-
-    // Создание PCAP контейнера
-    void createPcapContainer();
-
-    // Очистка временных файлов
-    void cleanup();
-
-    // Вспомогательные функции для ZIP
-    uint32_t calculateCRC32(const std::vector<uint8_t>& data);
-};
-
-*/
