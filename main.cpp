@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <sstream>
 #include <filesystem>
+
 #include <re2/re2.h>
 #include <boost/regex.hpp>
 #include <boost/algorithm/string/replace.hpp> // ??? ????????????? ???????????? ? boost
@@ -11,7 +12,13 @@
 #include <hs/hs.h> // Hyperscan
 #include "Signatures.h"
 #include "generator/Generator.h"
+#include "benchmark/benchmark.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib") // На случай, если CMake не подхватит
+#endif
 
 
 namespace fs = std::filesystem;
@@ -28,6 +35,18 @@ struct ScanStats {
     int png = 0; int jpg = 0; int gif = 0; int bmp = 0; int mkv = 0; int mp3 = 0;
     int html = 0; int xml = 0; int json = 0; int eml = 0;
     int unknown = 0;
+
+    // Оператор сложения для объединения результатов потоков
+    ScanStats& operator+=(const ScanStats& other) {
+        pdf += other.pdf;
+        doc += other.doc; xls += other.xls; ppt += other.ppt; ole += other.ole;
+        docx += other.docx; xlsx += other.xlsx; pptx += other.pptx; zip += other.zip;
+        rar += other.rar;
+        png += other.png; jpg += other.jpg; gif += other.gif; bmp += other.bmp; mkv += other.mkv; mp3 += other.mp3;
+        html += other.html; xml += other.xml; json += other.json; eml += other.eml;
+        unknown += other.unknown;
+        return *this;
+    }
 
     void print(const std::string& engine_name) const {
         std::cout << "===== " << engine_name << " Results =====" << std::endl;
@@ -48,6 +67,63 @@ struct ScanStats {
         std::cout << "========================================" << std::endl;
     }
 };
+
+// Функция сравнения сгенерированного и найденного
+void compare_stats(const GenStats& gen, const ScanStats& scan, const std::string& engine_name) {
+    std::cout << "\n>>> COMPARISON REPORT (" << engine_name << ") <<<\n";
+
+    auto check = [](const std::string& label, int expected, int actual) {
+        std::cout << std::left << std::setw(20) << label
+            << " Generated: " << std::setw(5) << expected
+            << " Found: " << std::setw(5) << actual;
+        if (expected == actual) std::cout << " [OK]";
+        else std::cout << " [MISMATCH] (" << (actual - expected) << ")";
+        std::cout << std::endl;
+        };
+
+    // Группируем для сравнения, так как ScanStats имеет более детальную разбивку или другие категории
+
+    // PDF
+    check("PDF", gen.pdf, scan.pdf);
+
+    // Old Office (OLE)
+    // В генераторе это office_ole, в сканере doc+xls+ppt+ole
+    int scan_ole_total = scan.doc + scan.xls + scan.ppt + scan.ole;
+    check("Old Office (OLE)", gen.office_ole, scan_ole_total);
+
+    // New Office (OpenXML)
+    // В генераторе office_xml, в сканере docx+xlsx+pptx
+    int scan_xml_total = scan.docx + scan.xlsx + scan.pptx;
+    check("New Office (XML)", gen.office_xml, scan_xml_total);
+
+    // ZIP (Pure)
+    // Сканер может путать ZIP и OpenXML если не настроен приоритет, но проверим чистые ZIP
+    // ScanStats.zip - это "Generic ZIP", не распознанный как Office
+    check("Pure ZIP", gen.zip, scan.zip);
+
+    // RAR
+    check("RAR", gen.rar, scan.rar);
+
+    // Media
+    check("PNG", gen.png, scan.png);
+    check("JPG", gen.jpg, scan.jpg);
+    check("GIF", gen.gif, scan.gif);
+    check("BMP", gen.bmp, scan.bmp);
+    check("MKV", gen.mkv, scan.mkv);
+    check("MP3", gen.mp3, scan.mp3);
+
+    // Text
+    check("HTML", gen.html, scan.html);
+    check("XML", gen.xml, scan.xml);
+    check("JSON", gen.json, scan.json);
+    check("EML", gen.eml, scan.eml);
+
+    // TXT в ScanStats явно не выделен (попадает в Unknown или нужно добавить логику в сканеры)
+    std::cout << "--------------------------------------------------\n";
+    std::cout << "Total Generated: " << gen.total_files << "\n";
+    std::cout << "Total Unknown (scanned): " << scan.unknown << " (Expected ~" << gen.txt << " txt files)\n";
+    std::cout << "==================================================\n";
+}
 
 // Интерфейс 
 class Scanner {
@@ -288,7 +364,6 @@ class BoostScanner : public Scanner {
         boost::regex r_html, r_xml, r_json, r_eml;
 };
 
-
 class HsScanner : public Scanner {
     public:
         
@@ -432,7 +507,199 @@ class HsScanner : public Scanner {
 
 };
 
-int main() {
+// Глобальный датасет (в RAM), чтобы исключить диск из замеров
+struct InMemoryFile {
+    std::vector<char> content;
+};
+static std::vector<InMemoryFile> g_dataset;
+static size_t g_totalBytes = 0;
+
+// ==========================================
+// 3. [NEW] ПРОСТАЯ ТАБЛИЦА СРАВНЕНИЯ
+// ==========================================
+
+void PrintTableRow(const std::string& cat, int gen, int scan) {
+    int diff = scan - gen;
+    std::cout << "| " << std::left << std::setw(22) << cat
+        << " | " << std::right << std::setw(10) << gen
+        << " | " << std::setw(10) << scan
+        << " | " << std::setw(10) << diff << " |" << std::endl;
+}
+
+void PrintSeparator() {
+    std::cout << "+------------------------+------------+------------+------------+" << std::endl;
+}
+
+template <class ScannerType>
+void VerifyAccuracy(const GenStats& gen) {
+    ScannerType scanner;
+    scanner.prepare();
+    ScanStats scan;
+
+    std::cout << "\n>>> Accuracy Check: " << scanner.name() << " <<<\n";
+
+    // Прогон в 1 поток для точности
+    for (const auto& file : g_dataset) {
+        scanner.scan(file.content.data(), file.content.size(), scan);
+    }
+
+    PrintSeparator();
+    std::cout << "| Category               | Generated  | Detected   | Diff       |" << std::endl;
+    PrintSeparator();
+
+    // 1. Документы
+    int scan_ole = scan.doc + scan.xls + scan.ppt + scan.ole;
+    int scan_xml = scan.docx + scan.xlsx + scan.pptx;
+
+    PrintTableRow("PDF", gen.pdf, scan.pdf);
+    PrintTableRow("Old Office (OLE)", gen.office_ole, scan_ole);
+    PrintTableRow("New Office (XML)", gen.office_xml, scan_xml);
+
+    // 2. Архивы
+    PrintTableRow("Pure ZIP", gen.zip, scan.zip);
+    PrintTableRow("RAR", gen.rar, scan.rar);
+
+    // 3. Медиа
+    PrintTableRow("PNG", gen.png, scan.png);
+    PrintTableRow("JPG", gen.jpg, scan.jpg);
+    PrintTableRow("GIF", gen.gif, scan.gif);
+    PrintTableRow("BMP", gen.bmp, scan.bmp);
+    PrintTableRow("MKV", gen.mkv, scan.mkv);
+    PrintTableRow("MP3", gen.mp3, scan.mp3);
+
+    // 4. Текст
+    PrintTableRow("HTML", gen.html, scan.html);
+    PrintTableRow("XML", gen.xml, scan.xml);
+    PrintTableRow("JSON", gen.json, scan.json);
+    PrintTableRow("EML", gen.eml, scan.eml);
+
+    PrintSeparator();
+    // Итого
+    // (txt считаем за "ожидаемые неизвестные")
+    PrintTableRow("Unknown / TXT", gen.txt, scan.unknown);
+    PrintSeparator();
+    std::cout << std::endl;
+}
+
+// ==========================================
+// 4. GOOGLE BENCHMARK FUNCTION
+// ==========================================
+
+/*
+template <class ScannerType>
+void BM_ScanEngine(benchmark::State& state) {
+    // 1. Setup (выполняется для каждого потока)
+    ScannerType scanner;
+    scanner.prepare(); // Alloc scratch for Hyperscan
+
+    if (g_dataset.empty()) {
+        state.SkipWithError("Dataset is empty!");
+        return;
+    }
+
+    // Расчет нагрузки для потока (Data Parallelism)
+    size_t total_files = g_dataset.size();
+    size_t num_threads = state.threads();
+    size_t thread_idx = state.thread_index();
+
+    // Делим файлы поровну между потоками
+    size_t chunk_size = total_files / num_threads;
+    size_t start = thread_idx * chunk_size;
+    size_t end = (thread_idx == num_threads - 1) ? total_files : (start + chunk_size);
+
+    // Считаем объем данных, который обработает ЭТОТ поток за одну итерацию
+    size_t batch_bytes = 0;
+    for (size_t i = start; i < end; ++i) {
+        batch_bytes += g_dataset[i].content.size();
+    }
+
+    // 2. Loop (Замер времени)
+    for (auto _ : state) {
+        ScanStats stats; // Легкая структура на стеке
+
+        // Сканируем свой кусок
+        for (size_t i = start; i < end; ++i) {
+            scanner.scan(g_dataset[i].content.data(), g_dataset[i].content.size(), stats);
+        }
+
+        // Защита от оптимизации
+        benchmark::DoNotOptimize(stats);
+    }
+
+    // 3. Metrics (MB/s)
+    // GBenchmark автоматически замерит время. Мы добавляем пропускную способность.
+    state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * batch_bytes);
+}
+*/
+
+template <class ScannerType>
+void BM_ScanEngine(benchmark::State& state) {
+    if (g_dataset.empty()) {
+        state.SkipWithError("Dataset is empty!");
+        return;
+    }
+
+    // 1. ЗАМЕР ПАМЯТИ ДО СОЗДАНИЯ СКАНЕРА
+    // Снимаем показания до того, как движок выделил память под свои базы
+    size_t mem_before = GetMemoryUsage();
+
+    // 2. ИНИЦИАЛИЗАЦИЯ (Scanner Setup)
+    // Здесь Hyperscan компилирует базу, RE2 строит автоматы и т.д.
+    ScannerType scanner;
+    scanner.prepare();
+
+    // 3. ЗАМЕР ПАМЯТИ ПОСЛЕ
+    size_t mem_after = GetMemoryUsage();
+
+    // Считаем разницу. Это и есть "вес" самого сканера в RAM.
+    double ram_overhead_mb = 0.0;
+    if (mem_after > mem_before) {
+        ram_overhead_mb = (double)(mem_after - mem_before) / (1024.0 * 1024.0);
+    }
+
+    // --- (Далее стандартная логика Data Parallelism) ---
+    size_t total_files = g_dataset.size();
+    size_t num_threads = state.threads();
+    size_t thread_idx = state.thread_index();
+    size_t chunk = total_files / num_threads;
+    size_t start = thread_idx * chunk;
+    size_t end = (thread_idx == num_threads - 1) ? total_files : start + chunk;
+
+    size_t bytes = 0;
+    for (size_t i = start; i < end; ++i) bytes += g_dataset[i].content.size();
+
+    // 4. ЦИКЛ ЗАМЕРА СКОРОСТИ
+    for (auto _ : state) {
+        ScanStats stats;
+        for (size_t i = start; i < end; ++i) {
+            scanner.scan(g_dataset[i].content.data(), g_dataset[i].content.size(), stats);
+        }
+        benchmark::DoNotOptimize(stats);
+    }
+
+    // 5. ЗАПИСЬ РЕЗУЛЬТАТОВ
+    state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * bytes);
+
+    // Добавляем пользовательский счетчик RAM
+    // benchmark::Counter::kAvgThreads - усреднит значение по потокам (так как каждый поток выделил память под свой сканер)
+    state.counters["RAM (MB)"] = benchmark::Counter(ram_overhead_mb, benchmark::Counter::kAvgThreads);
+}
+
+size_t GetMemoryUsage() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+        // PrivateUsage (Commit Charge) - это "честная" память, выделенная процессом,
+        // включая ту, что может быть сброшена в swap. Самый точный показатель утечек и аллокаций.
+        return pmc.PrivateUsage;
+    }
+#endif
+    return 0;
+}
+
+
+// вынести Сканер в отдельный файл.
+int main(int argc, char** argv) {
 
     StdScanner std_scanner;
     Re2Scanner re2_scanner;
@@ -443,7 +710,8 @@ int main() {
     ScanStats stats_std, stats_re2, stats_boost, stats_hs;
 
 	GenStats gen_stats;
-
+    
+    /*
     try {
         // Проверки пути
         if (!fs::exists(directory) || !fs::is_directory(directory)) {
@@ -499,6 +767,86 @@ int main() {
         std::cerr << "Ошибка: " << ex.what() << std::endl;
         return 1;
     }
+    */
+
+    try {
+        // 1. ГЕНЕРАЦИЯ
+        GenStats gen_stats;
+        if (!fs::exists(directory)) fs::create_directories(directory);
+
+        if (fs::is_empty(directory)) {
+            std::cout << "[Main] Generating dataset (1024 MB)...\n";
+            DataSetGenerator generator;
+            gen_stats = generator.generate(directory, 1024, DataSetGenerator::ContainerType::FOLDER);
+        }
+        else {
+            std::cout << "[Main] Files exist. Skipping generation.\n";
+            // Внимание: Если файлы старые, таблица точности будет пустой или неверной,
+            // так как gen_stats пуст. Для теста лучше удалить папку input.
+        }
+
+        // 2. ЗАГРУЗКА
+        std::cout << "[Main] Loading to RAM...\n";
+        g_totalBytes = 0;
+        for (const auto& entry : fs::directory_iterator(directory)) {
+            if (fs::is_regular_file(entry)) {
+                std::ifstream file(entry.path(), std::ios::binary | std::ios::ate);
+                if (!file) continue;
+                size_t s = file.tellg();
+                if (s == 0) continue;
+                InMemoryFile mem;
+                mem.content.resize(s);
+                file.seekg(0);
+                file.read(mem.content.data(), s);
+                g_dataset.push_back(std::move(mem));
+                g_totalBytes += s;
+            }
+        }
+        std::cout << "Loaded " << g_dataset.size() << " files (" << g_totalBytes / 1024 / 1024 << " MB).\n";
+
+        // 3. ПРОВЕРКА ТОЧНОСТИ (Только если есть с чем сравнивать)
+        if (gen_stats.total_files > 0) {
+            VerifyAccuracy<StdScanner>(gen_stats);
+            VerifyAccuracy<BoostScanner>(gen_stats);
+            VerifyAccuracy<Re2Scanner>(gen_stats);
+            VerifyAccuracy<HsScanner>(gen_stats);
+        }
+
+        // 4. ЗАПУСК ТЕСТОВ
+        std::cout << "\n[Main] Starting Benchmark...\n";
+
+        // Single Thread
+        benchmark::RegisterBenchmark("Std::Regex (ST)", BM_ScanEngine<StdScanner>)
+            ->Unit(benchmark::kMillisecond)->MinTime(1.0);
+        benchmark::RegisterBenchmark("Boost.Regex (ST)", BM_ScanEngine<BoostScanner>)
+            ->Unit(benchmark::kMillisecond)->MinTime(1.0);
+        benchmark::RegisterBenchmark("Google RE2 (ST)", BM_ScanEngine<Re2Scanner>)
+            ->Unit(benchmark::kMillisecond)->MinTime(1.0);
+        benchmark::RegisterBenchmark("Hyperscan (ST)", BM_ScanEngine<HsScanner>)
+            ->Unit(benchmark::kMillisecond)->MinTime(1.0);
+
+        // Multi Thread (Ryzen 7 7700 = 16 threads)
+        int threads = 16;
+        benchmark::RegisterBenchmark("Std::Regex (MT)", BM_ScanEngine<StdScanner>)
+            ->Threads(threads)->Unit(benchmark::kMillisecond)->MinTime(2.0);
+        benchmark::RegisterBenchmark("Boost.Regex (MT)", BM_ScanEngine<BoostScanner>)
+            ->Threads(threads)->Unit(benchmark::kMillisecond)->MinTime(2.0);
+        benchmark::RegisterBenchmark("Google RE2 (MT)", BM_ScanEngine<Re2Scanner>)
+            ->Threads(threads)->Unit(benchmark::kMillisecond)->MinTime(2.0);
+        benchmark::RegisterBenchmark("Hyperscan (MT)", BM_ScanEngine<HsScanner>)
+            ->Threads(threads)->Unit(benchmark::kMillisecond)->MinTime(2.0);
+
+        benchmark::Initialize(&argc, argv);
+        benchmark::RunSpecifiedBenchmarks();
+
+        g_dataset.clear();
+
+    }
+    catch (const std::exception& ex) {
+        std::cerr << "Error: " << ex.what() << std::endl;
+        return 1;
+    }
+    
 
     return 0;
 }

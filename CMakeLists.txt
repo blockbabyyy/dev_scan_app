@@ -82,5 +82,6 @@ target_link_libraries(RegexBench PRIVATE
     benchmark::benchmark
     benchmark::benchmark_main
     ${HYPERSCAN_LIBRARY}
+    Psapi
     # absl::absl  <-- Обычно подтягивается автоматически через RE2, но если будут ошибки линковки, раскомментируйте
 )
