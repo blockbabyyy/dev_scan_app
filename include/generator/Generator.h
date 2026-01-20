@@ -6,6 +6,10 @@
 #include <fstream>
 #include <filesystem>
 #include <random>
+#include <chrono>
+#include <cstring>
+#include "Signatures.h"
+#include <sstream>
 
 namespace fs = std::filesystem;
 

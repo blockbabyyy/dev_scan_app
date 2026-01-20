@@ -56,18 +56,18 @@ find_package(benchmark CONFIG REQUIRED)
 set(SOURCES
     main.cpp
     src/generator/Generator.cpp
-)
+ "src/Scaner.cpp")
 
 set(HEADERS
     include/generator/Generator.h
     include/Signatures.h 
-)
+ "include/Scaner.h")
 
 # ==============================================================================
 # 5. СБОРКА И ЛИНКОВКА
 # ==============================================================================
 
-add_executable(RegexBench ${SOURCES} ${HEADERS})
+add_executable(RegexBench ${SOURCES} ${HEADERS} "include/Scaner.h" "src/Scaner.cpp")
 
 # Подключаем папки заголовков
 target_include_directories(RegexBench PRIVATE

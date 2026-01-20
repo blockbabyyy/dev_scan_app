@@ -1,10 +1,4 @@
 #include "generator/Generator.h"
-#include "Signatures.h"
-#include <fstream>
-#include <chrono>
-#include <iostream>
-#include <cstring>
-#include <sstream>
 
 // Словарь для текстовых файлов
 const std::vector<std::string> DataSetGenerator::dictionary = {
@@ -108,11 +102,41 @@ GenStats DataSetGenerator::generate(const std::string& output_path, size_t total
     size_t target_size_bytes = total_size_mb * 1024 * 1024;
     GenStats stats;
 
+    fs::path base_path(output_path);
+    // Создаем директорию, если её нет
+    if (!fs::exists(base_path)) {
+        fs::create_directories(base_path);
+    }
+
+    fs::path final_path = base_path;
+
+
+    // Если это единый файл-контейнер, формируем полный путь к нему
+    if (type != ContainerType::FOLDER) {
+        std::string filename = "dataset";
+        if (type == ContainerType::ZIP) filename += ".zip";
+        else if (type == ContainerType::PCAP) filename += ".pcap";
+        else if (type == ContainerType::BIN) filename += ".bin";
+
+        final_path /= filename; // C:/.../input/dataset.pcap
+    }
+
+    // Конвертируем в string для передачи в методы
+    std::string path_str = final_path.string();
+
     switch (type) {
-        case ContainerType::FOLDER: generate_folder(output_path, target_size_bytes, stats); break;
-        case ContainerType::ZIP: generate_zip(output_path, target_size_bytes, stats); break;
-        case ContainerType::PCAP: generate_pcap(output_path, target_size_bytes, stats); break;
-        case ContainerType::BIN: generate_bin(output_path, target_size_bytes, stats); break;
+        case ContainerType::FOLDER: 
+            generate_folder(path_str, target_size_bytes, stats);
+            break;
+        case ContainerType::ZIP: 
+            generate_zip(path_str, target_size_bytes, stats);
+            break;
+        case ContainerType::PCAP: 
+            generate_pcap(path_str, target_size_bytes, stats);
+            break;
+        case ContainerType::BIN: 
+            generate_bin(path_str, target_size_bytes, stats);
+            break;
     }
     
     stats.total_bytes = target_size_bytes;
