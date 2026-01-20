@@ -107,22 +107,22 @@ StdScanner::StdScanner() {
     r_xlsx.assign(Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_XL), f);
     r_pptx.assign(Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_PPT), f);
 
-    r_pdf.assign("^" + Sig::raw_to_hex(Sig::Bin::PDF), f);
-    r_zip.assign("^" + Sig::raw_to_hex(Sig::Bin::ZIP), f);
-    r_rar4.assign("^" + Sig::raw_to_hex(Sig::Bin::RAR4), f);
-    r_rar5.assign("^" + Sig::raw_to_hex(Sig::Bin::RAR5), f);
+    r_pdf.assign( Sig::raw_to_hex(Sig::Bin::PDF), f);
+    r_zip.assign( Sig::raw_to_hex(Sig::Bin::ZIP), f);
+    r_rar4.assign( Sig::raw_to_hex(Sig::Bin::RAR4), f);
+    r_rar5.assign( Sig::raw_to_hex(Sig::Bin::RAR5), f);
 
-    r_png.assign("^" + Sig::raw_to_hex(Sig::Bin::PNG), f);
-    r_jpg.assign("^" + Sig::raw_to_hex(Sig::Bin::JPG), f);
-    r_gif.assign("^" + Sig::raw_to_hex(Sig::Bin::GIF), f);
-    r_bmp.assign("^" + Sig::raw_to_hex(Sig::Bin::BMP), f);
-    r_mkv.assign("^" + Sig::raw_to_hex(Sig::Bin::MKV), f);
-    r_mp3.assign("^" + Sig::raw_to_hex(Sig::Bin::MP3), f);
+    r_png.assign( Sig::raw_to_hex(Sig::Bin::PNG), f);
+    r_jpg.assign( Sig::raw_to_hex(Sig::Bin::JPG), f);
+    r_gif.assign( Sig::raw_to_hex(Sig::Bin::GIF), f);
+    r_bmp.assign( Sig::raw_to_hex(Sig::Bin::BMP), f);
+    r_mkv.assign( Sig::raw_to_hex(Sig::Bin::MKV), f);
+    r_mp3.assign( Sig::raw_to_hex(Sig::Bin::MP3), f);
 
-    r_html.assign("^" + Sig::raw_to_hex(Sig::Text::HTML), fi);
-    r_xml.assign("^" + Sig::raw_to_hex(Sig::Text::XML), fi);
-    r_json.assign("^" + Sig::raw_to_hex(Sig::Text::JSON), f);
-    r_eml.assign("^" + Sig::raw_to_hex(Sig::Text::EML), fi);
+    r_html.assign( Sig::raw_to_hex(Sig::Text::HTML), fi);
+    r_xml.assign( Sig::raw_to_hex(Sig::Text::XML), fi);
+    r_json.assign( Sig::raw_to_hex(Sig::Text::JSON), f);
+    r_eml.assign( Sig::raw_to_hex(Sig::Text::EML), fi);
 }
 
 std::string StdScanner::name() const { return "std::regex"; }
@@ -168,31 +168,31 @@ Re2Scanner::Re2Scanner() {
     ot.set_case_sensitive(false);
 
     // Используем std::make_unique для создания объектов RE2 в куче
-    r_doc = std::make_unique<re2::RE2>("^" + Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD), ob);
-    r_xls = std::make_unique<re2::RE2>("^" + Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL), ob);
-    r_ppt = std::make_unique<re2::RE2>("^" + Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT), ob);
-    r_ole_gen = std::make_unique<re2::RE2>("^" + Sig::raw_to_hex(Sig::Bin::OLE), ob);
+    r_doc = std::make_unique<re2::RE2>( Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD), ob);
+    r_xls = std::make_unique<re2::RE2>( Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL), ob);
+    r_ppt = std::make_unique<re2::RE2>( Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT), ob);
+    r_ole_gen = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::OLE), ob);
 
-    r_docx = std::make_unique<re2::RE2>("^" + Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_WORD), ob);
-    r_xlsx = std::make_unique<re2::RE2>("^" + Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_XL), ob);
-    r_pptx = std::make_unique<re2::RE2>("^" + Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_PPT), ob);
-    r_zip_gen = std::make_unique<re2::RE2>("^" + Sig::raw_to_hex(Sig::Bin::ZIP), ob);
+    r_docx = std::make_unique<re2::RE2>( Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_WORD), ob);
+    r_xlsx = std::make_unique<re2::RE2>( Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_XL), ob);
+    r_pptx = std::make_unique<re2::RE2>( Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_PPT), ob);
+    r_zip_gen = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::ZIP), ob);
 
-    r_pdf = std::make_unique<re2::RE2>("^" + Sig::raw_to_hex(Sig::Bin::PDF), ob);
-    r_rar4 = std::make_unique<re2::RE2>("^" + Sig::raw_to_hex(Sig::Bin::RAR4), ob);
-    r_rar5 = std::make_unique<re2::RE2>("^" + Sig::raw_to_hex(Sig::Bin::RAR5), ob);
+    r_pdf = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::PDF), ob);
+    r_rar4 = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::RAR4), ob);
+    r_rar5 = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::RAR5), ob);
 
-    r_png = std::make_unique<re2::RE2>("^" + Sig::raw_to_hex(Sig::Bin::PNG), ob);
-    r_jpg = std::make_unique<re2::RE2>("^" + Sig::raw_to_hex(Sig::Bin::JPG), ob);
-    r_gif = std::make_unique<re2::RE2>("^" + Sig::raw_to_hex(Sig::Bin::GIF), ob);
-    r_bmp = std::make_unique<re2::RE2>("^" + Sig::raw_to_hex(Sig::Bin::BMP), ob);
-    r_mkv = std::make_unique<re2::RE2>("^" + Sig::raw_to_hex(Sig::Bin::MKV), ob);
-    r_mp3 = std::make_unique<re2::RE2>("^" + Sig::raw_to_hex(Sig::Bin::MP3), ob);
+    r_png = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::PNG), ob);
+    r_jpg = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::JPG), ob);
+    r_gif = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::GIF), ob);
+    r_bmp = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::BMP), ob);
+    r_mkv = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::MKV), ob);
+    r_mp3 = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::MP3), ob);
 
-    r_html = std::make_unique<re2::RE2>("^" + Sig::Text::HTML, ot);
-    r_xml = std::make_unique<re2::RE2>("^" + Sig::Text::XML, ot);
-    r_json = std::make_unique<re2::RE2>("^" + Sig::Text::JSON, ob);
-    r_eml = std::make_unique<re2::RE2>("^" + Sig::Text::EML, ot);
+    r_html = std::make_unique<re2::RE2>( Sig::Text::HTML, ot);
+    r_xml = std::make_unique<re2::RE2>( Sig::Text::XML, ot);
+    r_json = std::make_unique<re2::RE2>( Sig::Text::JSON, ob);
+    r_eml = std::make_unique<re2::RE2>( Sig::Text::EML, ot);
 }
 
 
@@ -236,31 +236,31 @@ BoostScanner::BoostScanner() {
     auto flags_bin = boost::regex::perl;
     auto flags_text = boost::regex::perl | boost::regex::icase;
 
-    r_doc.assign("\\A" + Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD), flags_bin);
-    r_xls.assign("\\A" + Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL), flags_bin);
-    r_ppt.assign("\\A" + Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT), flags_bin);
-    r_ole_gen.assign("\\A" + Sig::raw_to_hex(Sig::Bin::OLE), flags_bin);
+    r_doc.assign( Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD), flags_bin);
+    r_xls.assign( Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL), flags_bin);
+    r_ppt.assign( Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT), flags_bin);
+    r_ole_gen.assign( Sig::raw_to_hex(Sig::Bin::OLE), flags_bin);
 
-    r_docx.assign("\\A" + Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_WORD), flags_bin);
-    r_xlsx.assign("\\A" + Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_XL), flags_bin);
-    r_pptx.assign("\\A" + Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_PPT), flags_bin);
-    r_zip_gen.assign("\\A" + Sig::raw_to_hex(Sig::Bin::ZIP), flags_bin);
+    r_docx.assign( Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_WORD), flags_bin);
+    r_xlsx.assign( Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_XL), flags_bin);
+    r_pptx.assign( Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_PPT), flags_bin);
+    r_zip_gen.assign( Sig::raw_to_hex(Sig::Bin::ZIP), flags_bin);
 
-    r_pdf.assign("\\A" + Sig::raw_to_hex(Sig::Bin::PDF), flags_bin);
-    r_rar4.assign("\\A" + Sig::raw_to_hex(Sig::Bin::RAR4), flags_bin);
-    r_rar5.assign("\\A" + Sig::raw_to_hex(Sig::Bin::RAR5), flags_bin);
+    r_pdf.assign( Sig::raw_to_hex(Sig::Bin::PDF), flags_bin);
+    r_rar4.assign( Sig::raw_to_hex(Sig::Bin::RAR4), flags_bin);
+    r_rar5.assign( Sig::raw_to_hex(Sig::Bin::RAR5), flags_bin);
 
-    r_png.assign("\\A" + Sig::raw_to_hex(Sig::Bin::PNG), flags_bin);
-    r_jpg.assign("\\A" + Sig::raw_to_hex(Sig::Bin::JPG), flags_bin);
-    r_gif.assign("\\A" + Sig::raw_to_hex(Sig::Bin::GIF), flags_bin);
-    r_bmp.assign("\\A" + Sig::raw_to_hex(Sig::Bin::BMP), flags_bin);
-    r_mkv.assign("\\A" + Sig::raw_to_hex(Sig::Bin::MKV), flags_bin);
-    r_mp3.assign("\\A" + Sig::raw_to_hex(Sig::Bin::MP3), flags_bin);
+    r_png.assign( Sig::raw_to_hex(Sig::Bin::PNG), flags_bin);
+    r_jpg.assign( Sig::raw_to_hex(Sig::Bin::JPG), flags_bin);
+    r_gif.assign( Sig::raw_to_hex(Sig::Bin::GIF), flags_bin);
+    r_bmp.assign( Sig::raw_to_hex(Sig::Bin::BMP), flags_bin);
+    r_mkv.assign( Sig::raw_to_hex(Sig::Bin::MKV), flags_bin);
+    r_mp3.assign( Sig::raw_to_hex(Sig::Bin::MP3), flags_bin);
 
-    r_html.assign("\\A" + Sig::Text::HTML, flags_text);
-    r_xml.assign("\\A" + Sig::Text::XML, flags_text);
-    r_json.assign("\\A" + Sig::Text::JSON, flags_bin);
-    r_eml.assign("\\A" + Sig::Text::EML, flags_text);
+    r_html.assign( Sig::Text::HTML, flags_text);
+    r_xml.assign( Sig::Text::XML, flags_text);
+    r_json.assign( Sig::Text::JSON, flags_bin);
+    r_eml.assign( Sig::Text::EML, flags_text);
 }
 
 std::string BoostScanner::name() const { return "Boost.Regex"; }
@@ -298,31 +298,31 @@ void BoostScanner::scan(const char* d, size_t s, ScanStats& st) {
 
 HsScanner::HsScanner() {
     // Подготовка паттернов
-    std::string p_doc = "^" + Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD);
-    std::string p_xls = "^" + Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL);
-    std::string p_ppt = "^" + Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT);
-    std::string p_ole = "^" + Sig::raw_to_hex(Sig::Bin::OLE);
+    std::string p_doc =  Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD);
+    std::string p_xls =  Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL);
+    std::string p_ppt =  Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT);
+    std::string p_ole =  Sig::raw_to_hex(Sig::Bin::OLE);
 
-    std::string p_docx = "^" + Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_WORD);
-    std::string p_xlsx = "^" + Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_XL);
-    std::string p_pptx = "^" + Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_PPT);
-    std::string p_zip = "^" + Sig::raw_to_hex(Sig::Bin::ZIP);
+    std::string p_docx =  Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_WORD);
+    std::string p_xlsx =  Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_XL);
+    std::string p_pptx =  Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_PPT);
+    std::string p_zip =  Sig::raw_to_hex(Sig::Bin::ZIP);
 
-    std::string p_pdf = "^" + Sig::raw_to_hex(Sig::Bin::PDF);
-    std::string p_rar4 = "^" + Sig::raw_to_hex(Sig::Bin::RAR4);
-    std::string p_rar5 = "^" + Sig::raw_to_hex(Sig::Bin::RAR5);
+    std::string p_pdf =  Sig::raw_to_hex(Sig::Bin::PDF);
+    std::string p_rar4 =  Sig::raw_to_hex(Sig::Bin::RAR4);
+    std::string p_rar5 =  Sig::raw_to_hex(Sig::Bin::RAR5);
 
-    std::string p_png = "^" + Sig::raw_to_hex(Sig::Bin::PNG);
-    std::string p_jpg = "^" + Sig::raw_to_hex(Sig::Bin::JPG);
-    std::string p_gif = "^" + Sig::raw_to_hex(Sig::Bin::GIF);
-    std::string p_bmp = "^" + Sig::raw_to_hex(Sig::Bin::BMP);
-    std::string p_mkv = "^" + Sig::raw_to_hex(Sig::Bin::MKV);
-    std::string p_mp3 = "^" + Sig::raw_to_hex(Sig::Bin::MP3);
+    std::string p_png =  Sig::raw_to_hex(Sig::Bin::PNG);
+    std::string p_jpg =  Sig::raw_to_hex(Sig::Bin::JPG);
+    std::string p_gif =  Sig::raw_to_hex(Sig::Bin::GIF);
+    std::string p_bmp =  Sig::raw_to_hex(Sig::Bin::BMP);
+    std::string p_mkv =  Sig::raw_to_hex(Sig::Bin::MKV);
+    std::string p_mp3 =  Sig::raw_to_hex(Sig::Bin::MP3);
 
-    std::string p_html = "^" + Sig::Text::HTML;
-    std::string p_xml = "^" + Sig::Text::XML;
-    std::string p_json = "^" + Sig::Text::JSON;
-    std::string p_eml = "^" + Sig::Text::EML;
+    std::string p_html =  Sig::Text::HTML;
+    std::string p_xml =  Sig::Text::XML;
+    std::string p_json =  Sig::Text::JSON;
+    std::string p_eml =  Sig::Text::EML;
 
     const char* exprs[] = {
         p_doc.c_str(), p_xls.c_str(), p_ppt.c_str(), p_ole.c_str(),

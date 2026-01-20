@@ -234,7 +234,7 @@ int main(int argc, char** argv) {
 
 	GenStats gen_stats;
     
-    DataSetGenerator::ContainerType type = DataSetGenerator::ContainerType::PCAP;
+    DataSetGenerator::ContainerType type = DataSetGenerator::ContainerType::FOLDER;
 	size_t gen_size_mb = 40;
     /*
     try {

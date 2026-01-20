@@ -418,3 +418,4 @@ FodyWeavers.xsd
 *.msp
 input/
 CMakeSettings.json
+dev_scan_app.zip
