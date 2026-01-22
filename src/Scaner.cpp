@@ -116,6 +116,81 @@ StdScanner::StdScanner() {
 }
 std::string StdScanner::name() const { return "std::regex"; }
 void StdScanner::scan(const char* d, size_t s, ScanStats& st) {
+    // Лямбда для поиска с выводом статуса
+    auto run_check = [&](const std::string& label, const std::regex& re, int& counter, const std::string& sig_check = "") {
+        // 1. Быстрая проверка сигнатуры (Pre-filter)
+        if (!sig_check.empty() && !has_sig(d, s, sig_check)) {
+            return; // Пропускаем, если нет сигнатуры
+        }
+
+        // 2. Вывод статуса (перезаписываемая строка)
+        std::cout << "\r[StdScanner] Scanning: " << std::left << std::setw(10) << label
+            << " | Found so far: " << counter << std::flush;
+
+        // 3. Поиск регуляркой
+        const char* start = d;
+        const char* end = d + s;
+        std::cmatch m;
+
+        try {
+            // Проверка на пустую/битую регулярку
+            if (re.mark_count() == 0 && std::string(start, std::min((size_t)1, s)).empty()) return;
+
+            while (start < end && std::regex_search(start, end, m, re)) {
+                counter++;
+                // Обновляем счетчик в реальном времени
+                std::cout << "\r[StdScanner] Scanning: " << std::left << std::setw(10) << label
+                    << " | Found so far: " << counter << std::flush;
+
+                auto shift = std::max((std::ptrdiff_t)1, m.length());
+                start += m.position() + shift;
+            }
+        }
+        catch (const std::exception& e) {
+            std::cerr << "\n[Error] Regex failed for " << label << ": " << e.what() << "\n";
+        }
+        };
+
+    // --- ЗАПУСК ПРОВЕРОК ---
+
+    // OLE Группа
+    run_check("DOC (OLE)", r_doc, st.doc, Sig::Bin::OLE);
+    run_check("XLS (OLE)", r_xls, st.xls, Sig::Bin::OLE);
+    run_check("PPT (OLE)", r_ppt, st.ppt, Sig::Bin::OLE);
+
+    // ZIP / Office XML Группа
+    // Сначала ищем просто ZIP хедер, если есть - копаем глубже
+    if (has_sig(d, s, Sig::Bin::ZIP_HEAD)) {
+        run_check("DOCX", r_docx, st.docx);
+        run_check("XLSX", r_xlsx, st.xlsx);
+        run_check("PPTX", r_pptx, st.pptx);
+        run_check("ZIP", r_zip, st.zip);
+    }
+
+    run_check("PDF", r_pdf, st.pdf, Sig::Bin::PDF_HEAD);
+    run_check("RAR4", r_rar4, st.rar, Sig::Bin::RAR4);
+    run_check("RAR5", r_rar5, st.rar, Sig::Bin::RAR5);
+
+    run_check("PNG", r_png, st.png, Sig::Bin::PNG_HEAD);
+    run_check("JPG", r_jpg, st.jpg, Sig::Bin::JPG_HEAD);
+    run_check("GIF", r_gif, st.gif, Sig::Bin::GIF_HEAD);
+
+    run_check("BMP", r_bmp, st.bmp, Sig::Bin::BMP_HEAD.substr(0, 2)); // Проверяем только "BM"
+
+    run_check("MKV", r_mkv, st.mkv, Sig::Bin::MKV);
+    run_check("MP3", r_mp3, st.mp3, Sig::Bin::MP3);
+
+    // Текстовые файлы (самые опасные для зависания из-за обилия текста)
+    run_check("HTML", r_html, st.html, "<html");
+    run_check("XML", r_xml, st.xml, "<?xml");
+    run_check("JSON", r_json, st.json, "{");
+    run_check("EML", r_eml, st.eml, "From:");
+
+    // Очистка строки статуса после завершения
+    std::cout << "\r[StdScanner] Done.                                           \n";
+}
+/*
+void StdScanner::scan(const char* d, size_t s, ScanStats& st) {
     auto searcher = [](const char* start, const char* end, std::cmatch& m, const std::regex& re) { return std::regex_search(start, end, m, re); };
     if (has_sig(d, s, Sig::Bin::OLE)) {
         st.doc += count_matches_std(d, s, r_doc, searcher);
@@ -142,7 +217,7 @@ void StdScanner::scan(const char* d, size_t s, ScanStats& st) {
     st.json += count_matches_std(d, s, r_json, searcher);
     st.eml += count_matches_std(d, s, r_eml, searcher);
 }
-
+*/
 // ==========================================
 // Re2Scanner
 // ==========================================

@@ -7,13 +7,14 @@
 #include <random> 
 #include "Scaner.h"
 
+// Используем ScanStats как GenStats для единообразия
 using GenStats = ScanStats;
 
 enum class OutputMode {
-    FOLDER, // Отдельные файлы
-    BIN,    // Один сплошной файл (конкатенация)
-    PCAP,   // Дамп трафика (файлы внутри пакетов)
-    ZIP     // Архив без сжатия (Store)
+    FOLDER, // Папка с файлами
+    BIN,    // Бинарная склейка (Blob)
+    PCAP,   // Дамп трафика (файлы как payload пакетов)
+    ZIP     // ZIP-архив без сжатия (Store)
 };
 
 class DataSetGenerator {
@@ -28,29 +29,29 @@ public:
 
     DataSetGenerator();
 
-    // Главный метод
-    GenStats generate(const std::filesystem::path& output_path, int count, OutputMode mode, double mix_ratio = 0.0);
+    // Генерация заданного количества файлов
+    GenStats generate_count(const std::filesystem::path& output_path, int count, OutputMode mode, double mix_ratio = 0.0);
+
+    // Генерация заданного объема данных (в МБ)
+    GenStats generate_size(const std::filesystem::path& output_path, int size_mb, OutputMode mode, double mix_ratio = 0.0);
 
 private:
     std::map<std::string, FileType> types;
     std::vector<std::string> extensions;
+    std::vector<std::string> dictionary; // Словарь для реалистичного текста
 
-    // Генерирует "чистый" контент файла в память (PDF, DOC, JPG...)
-    // Возвращает пару {расширение, данные}
+    // Создание контента одного файла (или склейки)
     std::pair<std::string, std::string> create_payload(std::mt19937& rng, bool is_mixed);
 
-    // Хелпер заполнения
-    void fill_safe(std::stringstream& ss, size_t count, bool is_text);
+    // Заполнение мусором (с ловушками или словами)
+    void fill_complex(std::stringstream& ss, size_t count, bool is_text, std::mt19937& rng);
 
-    // Реализации упаковщиков
-    void write_as_folder(const std::filesystem::path& dir, int count, double mix_ratio, GenStats& stats);
-    void write_as_bin(const std::filesystem::path& file, int count, double mix_ratio, GenStats& stats);
-    void write_as_pcap(const std::filesystem::path& file, int count, double mix_ratio, GenStats& stats);
-    void write_as_zip(const std::filesystem::path& file, int count, double mix_ratio, GenStats& stats);
+    // Выбор реалистичного размера в зависимости от типа
+    size_t get_realistic_size(const std::string& ext, std::mt19937& rng);
 
-    // Для ZIP CRC32
+    // Универсальный метод записи (limit_type: 0 = count, 1 = bytes)
+    void write_generic(const std::filesystem::path& path, size_t limit, int limit_type, OutputMode mode, double mix_ratio, GenStats& stats);
+
     uint32_t calculate_crc32(const std::string& data);
-
-    // Обновление статистики
     void update_stats(const std::string& ext, GenStats& stats);
 };

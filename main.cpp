@@ -6,13 +6,14 @@
 #include <fstream>
 #include <iomanip>
 #include <cstring>
+#include <algorithm> // для transform
 
 #include "Scaner.h"
 #include "generator/Generator.h"
 
 namespace fs = std::filesystem;
 
-// Чтение всего файла в память
+// Хелпер для чтения файла целиком в память
 std::string read_file(const fs::path& path) {
     std::ifstream f(path, std::ios::binary | std::ios::ate);
     if (!f) return "";
@@ -24,24 +25,29 @@ std::string read_file(const fs::path& path) {
     return str;
 }
 
+// Запуск бенчмарка для одного движка
 void run_benchmark(Scanner* scanner, const fs::path& target, bool is_folder, const GenStats& expected) {
     ScanStats actual;
     size_t total_bytes = 0;
 
     std::cout << "\n>>> Scanning with " << scanner->name() << "..." << std::endl;
+
+    // Замер времени (только сканирование, без чтения диска если возможно, 
+    // но здесь мы включаем чтение, чтобы эмулировать реальную работу)
     auto start = std::chrono::high_resolution_clock::now();
 
     if (is_folder) {
         for (const auto& entry : fs::directory_iterator(target)) {
             if (entry.is_regular_file()) {
                 std::string data = read_file(entry.path());
+                if (data.empty()) continue;
                 total_bytes += data.size();
                 scanner->scan(data.data(), data.size(), actual);
             }
         }
     }
     else {
-        // Один большой файл (BIN, PCAP, ZIP)
+        // Режим контейнера (ZIP, PCAP, BIN) - сканируем один большой файл
         std::string data = read_file(target);
         total_bytes += data.size();
         if (!data.empty()) {
@@ -53,17 +59,23 @@ void run_benchmark(Scanner* scanner, const fs::path& target, bool is_folder, con
     std::chrono::duration<double> diff = end - start;
     double mb = total_bytes / (1024.0 * 1024.0);
 
-    // Вывод
-    std::cout << " Time:  " << diff.count() << " sec (" << (mb / diff.count()) << " MB/s)\n";
+    // --- Вывод результатов ---
+    std::cout << " Time:  " << std::fixed << std::setprecision(3) << diff.count() << " sec ("
+        << (diff.count() > 0 ? mb / diff.count() : 0.0) << " MB/s)\n";
     std::cout << " Size:  " << mb << " MB\n";
 
+    // Таблица сравнения
     auto row = [&](const std::string& n, int exp, int act) {
-        std::cout << " " << std::left << std::setw(12) << n << " | Exp:" << std::setw(5) << exp
-            << " | Act:" << std::setw(5) << act
-            << " | " << (act == exp ? "OK" : (act > exp ? "FP" : "MISS")) << "\n";
+        std::string status = (act == exp) ? "OK" : (act < exp ? "MISS" : "FP");
+        std::cout << "| " << std::left << std::setw(12) << n
+            << " | " << std::setw(6) << exp
+            << " | " << std::setw(6) << act
+            << " | " << status << "\n";
         };
 
     std::cout << "------------------------------------------\n";
+    std::cout << "| TYPE         | GEN    | FOUND  | STATUS\n";
+    std::cout << "|--------------|--------|--------|-------\n";
     row("PDF", expected.pdf, actual.pdf);
     row("ZIP", expected.zip, actual.zip);
     row("RAR", expected.rar, actual.rar);
@@ -71,52 +83,116 @@ void run_benchmark(Scanner* scanner, const fs::path& target, bool is_folder, con
         actual.doc + actual.xls + actual.ppt);
     row("Office(XML)", expected.docx + expected.xlsx + expected.pptx,
         actual.docx + actual.xlsx + actual.pptx);
-    row("Media", expected.mkv + expected.mp3 + expected.png + expected.jpg + expected.gif + expected.bmp,
-        actual.mkv + actual.mp3 + actual.png + actual.jpg + actual.gif + actual.bmp);
+    row("Images", expected.png + expected.jpg + expected.gif + expected.bmp,
+        actual.png + actual.jpg + actual.gif + actual.bmp);
+    row("Media", expected.mkv + expected.mp3,
+        actual.mkv + actual.mp3);
     row("Text", expected.json + expected.html + expected.xml + expected.eml,
         actual.json + actual.html + actual.xml + actual.eml);
     std::cout << "------------------------------------------\n";
 }
 
 void print_usage() {
-    std::cout << "Usage: ScanerApp [mode] [count] [mix_ratio]\n";
+    std::cout << "Usage: ScanerApp [mode] [amount] [mix]\n";
     std::cout << "  mode: folder, bin, pcap, zip\n";
-    std::cout << "  count: number of files (default 1000)\n";
-    std::cout << "  mix: 0.0 - 1.0 (default 0.0)\n";
+    std::cout << "  amount: number of files (e.g. 1000) OR size in MB (e.g. 100mb)\n";
+    std::cout << "  mix: 0.0 - 1.0 (probability of gluing files)\n";
+    std::cout << "Example: ScanerApp zip 500mb 0.2\n";
 }
 
 int main(int argc, char* argv[]) {
-    int count = 1000;
+    // Дефолтные настройки
+    std::string amount_str = "10";
     double mix = 0.0;
     OutputMode mode = OutputMode::FOLDER;
-    fs::path out_path = "dataset"; // папка по умолчанию
 
+    // Базовое имя выходного ресурса
+    std::string out_base_name = "dataset";
+    fs::path out_path;
+
+    // 1. Парсинг аргументов
     if (argc > 1) {
         std::string m = argv[1];
-        if (m == "bin") { mode = OutputMode::BIN; out_path = "dataset.bin"; }
-        else if (m == "pcap") { mode = OutputMode::PCAP; out_path = "dataset.pcap"; }
-        else if (m == "zip") { mode = OutputMode::ZIP; out_path = "dataset.zip"; }
-        else if (m == "folder") { mode = OutputMode::FOLDER; out_path = "dataset_dir"; }
+        // Приводим к нижнему регистру для удобства
+        std::transform(m.begin(), m.end(), m.begin(), ::tolower);
+
+        if (m == "bin") mode = OutputMode::BIN;
+        else if (m == "pcap") mode = OutputMode::PCAP;
+        else if (m == "zip") mode = OutputMode::ZIP;
+        else if (m == "folder") mode = OutputMode::FOLDER;
         else { print_usage(); return 1; }
     }
-    if (argc > 2) count = std::stoi(argv[2]);
+    if (argc > 2) amount_str = argv[2];
     if (argc > 3) mix = std::stod(argv[3]);
 
-    // 1. Generate
-    DataSetGenerator gen;
-    GenStats expected = gen.generate(out_path, count, mode, mix);
+    // 2. Установка правильного расширения файла
+    // Это решает проблему "PCAP и ZIP не создают реальные файлы"
+    if (mode == OutputMode::FOLDER) {
+        out_path = out_base_name + "_dir";
+    }
+    else if (mode == OutputMode::ZIP) {
+        out_path = out_base_name + ".zip";
+    }
+    else if (mode == OutputMode::PCAP) {
+        out_path = out_base_name + ".pcap";
+    }
+    else {
+        out_path = out_base_name + ".bin";
+    }
 
-    // 2. Prepare Engines
+    // 3. Определение лимита (файлы или мегабайты)
+    bool use_mb = false;
+    int limit_val = 0;
+    size_t mb_pos = amount_str.find("mb");
+    if (mb_pos == std::string::npos) mb_pos = amount_str.find("MB");
+
+    if (mb_pos != std::string::npos) {
+        use_mb = true;
+        limit_val = std::stoi(amount_str.substr(0, mb_pos));
+    }
+    else {
+        limit_val = std::stoi(amount_str);
+    }
+
+    // Инфо о запуске
+    std::cout << "=== Regex Benchmark Tool ===\n";
+    std::cout << "Mode:      " << (mode == OutputMode::FOLDER ? "FOLDER" :
+        (mode == OutputMode::ZIP ? "ZIP (Store)" :
+            (mode == OutputMode::PCAP ? "PCAP Stream" : "BIN Stream"))) << "\n";
+    std::cout << "Target:    " << limit_val << (use_mb ? " MB" : " Files") << "\n";
+    std::cout << "Mix Ratio: " << mix << "\n";
+    std::cout << "Output:    " << fs::absolute(out_path) << "\n\n";
+
+    // 4. Генерация
+    DataSetGenerator gen;
+    GenStats expected;
+
+    if (use_mb) {
+        expected = gen.generate_size(out_path, limit_val, mode, mix);
+    }
+    else {
+        expected = gen.generate_count(out_path, limit_val, mode, mix);
+    }
+
+    std::cout << "Generated Info:\n";
+    std::cout << "  Archives: " << (expected.pdf + expected.zip + expected.rar) << "\n";
+    std::cout << "  Office:   " << (expected.doc + expected.xls + expected.ppt + expected.docx + expected.xlsx + expected.pptx) << "\n";
+    std::cout << "  Media:    " << (expected.png + expected.jpg + expected.gif + expected.bmp + expected.mkv + expected.mp3) << "\n";
+    std::cout << "  Total:    " << expected.total_files << " files\n";
+
+    // 5. Инициализация движков
     std::vector<std::unique_ptr<Scanner>> scanners;
-    scanners.push_back(std::make_unique<StdScanner>());
-    scanners.push_back(std::make_unique<BoostScanner>());
+
+    // Можно закомментировать ненужные для ускорения отладки
+    //scanners.push_back(std::make_unique<StdScanner>());
+    //scanners.push_back(std::make_unique<BoostScanner>());
     scanners.push_back(std::make_unique<Re2Scanner>());
 
     auto hs = std::make_unique<HsScanner>();
     hs->prepare();
     scanners.push_back(std::move(hs));
 
-    // 3. Run
+    // 6. Запуск тестов
     for (const auto& s : scanners) {
         run_benchmark(s.get(), out_path, mode == OutputMode::FOLDER, expected);
     }

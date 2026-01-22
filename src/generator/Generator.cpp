@@ -6,7 +6,7 @@
 #include <ctime>
 #include <iomanip>
 
-// Таблица CRC32 (генерируется на лету или хардкод, тут упрощенно)
+// --- CRC32 Utils ---
 static uint32_t crc32_table[256];
 static bool crc_initialized = false;
 
@@ -22,9 +22,28 @@ void init_crc32() {
     crc_initialized = true;
 }
 
+// --- Traps & Config ---
+const std::vector<std::string> TRAPS_BIN = {
+    "\x50\x4B\x00\x00", // Fake PK
+    "\x25\x50\x44\x46", // %PDF header without tail
+    "\x47\x49\x46\x38", // GIF8 header without tail
+    "\xFF\xD8\xFF\x00", // JPG fake
+    "WordDocument"      // OLE marker without OLE header
+};
+
+const std::vector<std::string> TRAPS_TEXT = {
+    "<html fake='yes'>",
+    "{\"fake_json\": 1}",
+    "Subject: Fake Subject",
+    "%PDF-1.4 (comment)",
+    "PK\x03\x04(fake_zip_in_text)",
+    "GIF89a(fake)"
+};
+
 DataSetGenerator::DataSetGenerator() {
     init_crc32();
-    // Те же типы, что и в тестах (безопасные и с маркерами)
+
+    // Инициализация типов файлов с безопасными хвостами и маркерами
     types[".zip"] = { ".zip", Sig::Bin::ZIP_HEAD, "", Sig::Bin::ZIP_TAIL, false };
     types[".rar"] = { ".rar", Sig::Bin::RAR4, "", "", false };
     types[".png"] = { ".png", Sig::Bin::PNG_HEAD, "", Sig::Bin::PNG_TAIL, false };
@@ -46,49 +65,123 @@ DataSetGenerator::DataSetGenerator() {
     types[".eml"] = { ".eml", "From: user@loc", "", "", true };
 
     for (const auto& kv : types) extensions.push_back(kv.first);
+
+    // Словарь для реалистичного текста
+    dictionary = {
+        "lorem", "ipsum", "dolor", "sit", "amet", "consectetur", "adipiscing", "elit",
+        "function", "var", "const", "return", "if", "else", "for", "while",
+        "class", "public", "private", "protected", "import", "include",
+        "http://example.com", "user@domain.org", "127.0.0.1", "path/to/file"
+    };
 }
 
-// --- Payload Generation ---
-void DataSetGenerator::fill_safe(std::stringstream& ss, size_t count, bool is_text) {
-    if (count == 0) return;
-    if (is_text) {
-        for (size_t i = 0; i < count; ++i) ss.put(' ');
+// --- Logic ---
+
+size_t DataSetGenerator::get_realistic_size(const std::string& ext, std::mt19937& rng) {
+    std::uniform_int_distribution<int> chance(0, 100);
+    int c = chance(rng);
+
+    if (types[ext].is_text) {
+        // Текст: 1 КБ - 200 КБ
+        std::uniform_int_distribution<size_t> d(1024, 200 * 1024);
+        return d(rng);
+    }
+    else if (ext == ".mkv" || ext == ".mp3") {
+        // Медиа: 5 МБ - 50 МБ
+        std::uniform_int_distribution<size_t> d(5 * 1024 * 1024, 50 * 1024 * 1024);
+        return d(rng);
     }
     else {
-        // 0xCC - безопасный наполнитель
-        for (size_t i = 0; i < count; ++i) ss.put((char)0xCC);
+        // Бинарники: распределение по размеру
+        if (c < 50) { // 50% мелких (10KB - 500KB)
+            std::uniform_int_distribution<size_t> d(10 * 1024, 500 * 1024);
+            return d(rng);
+        }
+        else if (c < 90) { // 40% средних (500KB - 5MB)
+            std::uniform_int_distribution<size_t> d(500 * 1024, 5 * 1024 * 1024);
+            return d(rng);
+        }
+        else { // 10% крупных (5MB - 20MB)
+            std::uniform_int_distribution<size_t> d(5 * 1024 * 1024, 20 * 1024 * 1024);
+            return d(rng);
+        }
+    }
+}
+
+void DataSetGenerator::fill_complex(std::stringstream& ss, size_t count, bool is_text, std::mt19937& rng) {
+    if (count == 0) return;
+    size_t written = 0;
+
+    if (is_text) {
+        std::uniform_int_distribution<size_t> dict_idx(0, dictionary.size() - 1);
+        std::uniform_int_distribution<int> trap_chance(0, 100);
+
+        while (written < count) {
+            // Редкий шанс вставить текстовую ловушку
+            if (trap_chance(rng) < 2 && written + 30 < count) {
+                std::uniform_int_distribution<size_t> t_idx(0, TRAPS_TEXT.size() - 1);
+                std::string trap = TRAPS_TEXT[t_idx(rng)];
+                ss << trap << " ";
+                written += trap.size() + 1;
+            }
+            else {
+                // Обычные слова
+                std::string word = dictionary[dict_idx(rng)];
+                if (written + word.size() + 1 <= count) {
+                    ss << word << " ";
+                    written += word.size() + 1;
+                }
+                else {
+                    while (written < count) { ss.put(' '); written++; }
+                }
+            }
+        }
+    }
+    else {
+        std::uniform_int_distribution<int> trap_chance(0, 100);
+        while (written < count) {
+            if (trap_chance(rng) < 2 && written + 20 < count) {
+                std::uniform_int_distribution<size_t> t_idx(0, TRAPS_BIN.size() - 1);
+                std::string trap = TRAPS_BIN[t_idx(rng)];
+                ss.write(trap.data(), trap.size());
+                written += trap.size();
+            }
+            else {
+                ss.put((char)0xCC); // Безопасный мусор
+                written++;
+            }
+        }
     }
 }
 
 std::pair<std::string, std::string> DataSetGenerator::create_payload(std::mt19937& rng, bool is_mixed) {
     std::uniform_int_distribution<size_t> dist_idx(0, extensions.size() - 1);
-    std::uniform_int_distribution<size_t> dist_size(512, 4096);
-
     std::stringstream ss;
     std::string primary_ext;
 
     int parts = is_mixed ? (2 + (rng() % 2)) : 1;
 
     for (int p = 0; p < parts; ++p) {
-        if (p > 0) fill_safe(ss, 64, false); // Gap between mixed files
+        if (p > 0) fill_complex(ss, 128, false, rng);
 
         std::string ext = extensions[dist_idx(rng)];
-        if (p == 0) primary_ext = ext; // Считаем тип по первому файлу (условно)
+        if (p == 0) primary_ext = ext;
 
         const auto& t = types[ext];
-        size_t total_size = dist_size(rng);
+        size_t total_size = get_realistic_size(ext, rng);
 
         ss << t.head;
         size_t overhead = t.head.size() + t.middle.size() + t.tail.size();
-        size_t body = (total_size > overhead) ? total_size - overhead : 0;
+        if (total_size < overhead + 100) total_size = overhead + 100;
 
-        // Маркер ближе к началу (для RE2)
+        size_t body = total_size - overhead;
+        // Маркер (middle) ближе к началу для RE2
         size_t pre_marker = std::min((size_t)50, body);
         size_t post_marker = body - pre_marker;
 
-        fill_safe(ss, pre_marker, t.is_text);
+        fill_complex(ss, pre_marker, t.is_text, rng);
         ss << t.middle;
-        fill_safe(ss, post_marker, t.is_text);
+        fill_complex(ss, post_marker, t.is_text, rng);
         ss << t.tail;
     }
     return { primary_ext, ss.str() };
@@ -117,89 +210,6 @@ void DataSetGenerator::update_stats(const std::string& ext, GenStats& stats) {
     stats.total_files++;
 }
 
-// --- WRITE MODES ---
-
-void DataSetGenerator::write_as_folder(const std::filesystem::path& dir, int count, double mix_ratio, GenStats& stats) {
-    std::filesystem::create_directories(dir);
-    std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<double> dist_mix(0.0, 1.0);
-
-    for (int i = 0; i < count; ++i) {
-        bool is_mixed = dist_mix(rng) < mix_ratio;
-
-        // ext - это расширение основного (первого) файла в цепочке
-        auto [ext, data] = create_payload(rng, is_mixed);
-
-        // [FIX] Используем реальное расширение вместо .bin
-        // Если файл смешанный (например PDF+ZIP), он получит расширение первого (PDF).
-        std::string fname = "file_" + std::to_string(i) + ext;
-
-        std::ofstream f(dir / fname, std::ios::binary);
-        f << data;
-
-        // Статистику обновляем как и раньше
-        update_stats(ext, stats);
-    }
-}
-
-void DataSetGenerator::write_as_bin(const std::filesystem::path& file, int count, double mix_ratio, GenStats& stats) {
-    std::ofstream f(file, std::ios::binary);
-    std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<double> dist_mix(0.0, 1.0);
-
-    for (int i = 0; i < count; ++i) {
-        bool is_mixed = dist_mix(rng) < mix_ratio;
-        auto [ext, data] = create_payload(rng, is_mixed);
-        f << data;
-        update_stats(ext, stats);
-    }
-}
-
-// Простая структура PCAP Header
-struct PcapGlobalHeader {
-    uint32_t magic = 0xa1b2c3d4;
-    uint16_t version_major = 2;
-    uint16_t version_minor = 4;
-    int32_t  thiszone = 0;
-    uint32_t sigfigs = 0;
-    uint32_t snaplen = 65535;
-    uint32_t network = 1; // Ethernet
-};
-
-struct PcapPacketHeader {
-    uint32_t ts_sec;
-    uint32_t ts_usec;
-    uint32_t incl_len;
-    uint32_t orig_len;
-};
-
-void DataSetGenerator::write_as_pcap(const std::filesystem::path& file, int count, double mix_ratio, GenStats& stats) {
-    std::ofstream f(file, std::ios::binary);
-    std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<double> dist_mix(0.0, 1.0);
-
-    PcapGlobalHeader gh;
-    f.write((char*)&gh, sizeof(gh));
-
-    uint32_t timestamp = (uint32_t)std::time(nullptr);
-
-    for (int i = 0; i < count; ++i) {
-        bool is_mixed = dist_mix(rng) < mix_ratio;
-        auto [ext, data] = create_payload(rng, is_mixed);
-        update_stats(ext, stats);
-
-        PcapPacketHeader ph;
-        ph.ts_sec = timestamp + i;
-        ph.ts_usec = 0;
-        ph.incl_len = (uint32_t)data.size();
-        ph.orig_len = (uint32_t)data.size();
-
-        f.write((char*)&ph, sizeof(ph));
-        f.write(data.data(), data.size());
-    }
-}
-
-// Helpers for ZIP
 uint32_t DataSetGenerator::calculate_crc32(const std::string& data) {
     uint32_t crc = 0xFFFFFFFF;
     for (unsigned char c : data) {
@@ -208,153 +218,175 @@ uint32_t DataSetGenerator::calculate_crc32(const std::string& data) {
     return crc ^ 0xFFFFFFFF;
 }
 
-// ZIP Structures (Packed)
+// --- Container Structures ---
 #pragma pack(push, 1)
+struct PcapGlobalHeader {
+    uint32_t magic = 0xa1b2c3d4;
+    uint16_t vm = 2; uint16_t vn = 4; int32_t tz = 0; uint32_t sf = 0; uint32_t sl = 65535; uint32_t net = 1;
+};
+struct PcapPacketHeader {
+    uint32_t ts_sec; uint32_t ts_usec; uint32_t incl; uint32_t orig;
+};
+
+// [FIX] Переименованы поля для соответствия коду (были сокращения csz, usz...)
 struct ZipLocalHeader {
     uint32_t sig = 0x04034b50;
-    uint16_t version = 20;
-    uint16_t flags = 0;
-    uint16_t compression = 0; // Store
-    uint16_t time = 0;
-    uint16_t date = 0;
-    uint32_t crc32 = 0;
-    uint32_t comp_size = 0;
-    uint32_t uncomp_size = 0;
-    uint16_t name_len = 0;
-    uint16_t extra_len = 0;
+    uint16_t ver = 20;
+    uint16_t fl = 0;
+    uint16_t comp = 0;
+    uint16_t tm = 0;
+    uint16_t dt = 0;
+    uint32_t crc32 = 0;       // Исправлено
+    uint32_t comp_size = 0;   // Исправлено
+    uint32_t uncomp_size = 0; // Исправлено
+    uint16_t name_len = 0;    // Исправлено
+    uint16_t extra_len = 0;   // Исправлено
 };
+
 struct ZipDirHeader {
     uint32_t sig = 0x02014b50;
     uint16_t ver_made = 20;
     uint16_t ver_need = 20;
-    uint16_t flags = 0;
-    uint16_t compression = 0;
-    uint16_t time = 0;
-    uint16_t date = 0;
-    uint32_t crc32 = 0;
-    uint32_t comp_size = 0;
-    uint32_t uncomp_size = 0;
-    uint16_t name_len = 0;
-    uint16_t extra_len = 0;
-    uint16_t comment_len = 0;
+    uint16_t fl = 0;
+    uint16_t comp = 0;
+    uint16_t tm = 0;
+    uint16_t dt = 0;
+    uint32_t crc32 = 0;        // Исправлено
+    uint32_t comp_size = 0;    // Исправлено
+    uint32_t uncomp_size = 0;  // Исправлено
+    uint16_t name_len = 0;     // Исправлено
+    uint16_t extra_len = 0;    // Исправлено
+    uint16_t comment_len = 0;  // Исправлено
     uint16_t disk_start = 0;
     uint16_t int_attr = 0;
     uint32_t ext_attr = 0;
-    uint32_t local_offset = 0;
+    uint32_t local_offset = 0; // Исправлено
 };
+
 struct ZipEOCD {
     uint32_t sig = 0x06054b50;
     uint16_t disk_num = 0;
     uint16_t disk_dir_start = 0;
-    uint16_t num_dir_this = 0;
-    uint16_t num_dir_total = 0;
-    uint32_t size_dir = 0;
-    uint32_t offset_dir = 0;
+    uint16_t num_dir_this = 0;  // Исправлено
+    uint16_t num_dir_total = 0; // Исправлено
+    uint32_t size_dir = 0;      // Исправлено
+    uint32_t offset_dir = 0;    // Исправлено
     uint16_t comment_len = 0;
 };
 #pragma pack(pop)
 
-void DataSetGenerator::write_as_zip(const std::filesystem::path& file, int count, double mix_ratio, GenStats& stats) {
-    std::ofstream f(file, std::ios::binary);
-    if (!f.is_open()) {
-        std::cerr << "Error: Cannot create ZIP file at " << file << std::endl;
-        return;
+// --- Universal Write Method ---
+void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t limit, int limit_type, OutputMode mode, double mix_ratio, GenStats& stats) {
+    // Подготовка
+    if (mode == OutputMode::FOLDER) {
+        if (std::filesystem::exists(path)) std::filesystem::remove_all(path);
+        std::filesystem::create_directories(path);
+    }
+    else {
+        if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
+    }
+
+    std::ofstream f;
+    if (mode != OutputMode::FOLDER) {
+        f.open(path, std::ios::binary);
+        if (mode == OutputMode::PCAP) {
+            PcapGlobalHeader gh; f.write((char*)&gh, sizeof(gh));
+        }
     }
 
     std::mt19937 rng(std::random_device{}());
     std::uniform_real_distribution<double> dist_mix(0.0, 1.0);
 
-    // Храним информацию о каждом добавленном файле для Central Directory
-    struct Entry {
-        uint32_t offset;
-        uint32_t crc;
-        uint32_t size;
-        std::string name;
-    };
-    std::vector<Entry> entries;
+    struct ZipEntry { uint32_t off; uint32_t crc; uint32_t sz; std::string name; };
+    std::vector<ZipEntry> zip_entries;
 
-    // 1. Пишем Local File Headers + Data
-    for (int i = 0; i < count; ++i) {
+    size_t current_count = 0;
+    size_t current_bytes = 0;
+    uint32_t timestamp = (uint32_t)std::time(nullptr);
+
+    // Главный цикл генерации
+    while (true) {
+        // Проверка условий выхода
+        if (limit_type == 0 && current_count >= limit) break; // По количеству
+        if (limit_type == 1 && current_bytes >= limit) break; // По размеру
+
         bool is_mixed = dist_mix(rng) < mix_ratio;
-
-        // Получаем расширение и данные
         auto [ext, data] = create_payload(rng, is_mixed);
         update_stats(ext, stats);
 
-        // Формируем имя файла внутри архива с правильным расширением
-        std::string fname = "file_" + std::to_string(i) + ext;
+        std::string fname = "file_" + std::to_string(current_count) + ext;
 
-        uint32_t offset = (uint32_t)f.tellp();
-        uint32_t crc = calculate_crc32(data);
+        if (mode == OutputMode::FOLDER) {
+            std::ofstream sub(path / fname, std::ios::binary);
+            sub << data;
+        }
+        else if (mode == OutputMode::BIN) {
+            f << data;
+        }
+        else if (mode == OutputMode::PCAP) {
+            PcapPacketHeader ph;
+            ph.ts_sec = timestamp + (uint32_t)current_count;
+            ph.ts_usec = 0;
+            ph.incl = (uint32_t)data.size();
+            ph.orig = (uint32_t)data.size();
+            f.write((char*)&ph, sizeof(ph));
+            f.write(data.data(), data.size());
+        }
+        else if (mode == OutputMode::ZIP) {
+            uint32_t off = (uint32_t)f.tellp();
+            uint32_t crc = calculate_crc32(data);
+            ZipLocalHeader lh;
+            lh.crc32 = crc;
+            lh.comp_size = (uint32_t)data.size();
+            lh.uncomp_size = (uint32_t)data.size();
+            lh.name_len = (uint16_t)fname.size();
+            f.write((char*)&lh, sizeof(lh));
+            f.write(fname.data(), fname.size());
+            f.write(data.data(), data.size());
+            zip_entries.push_back({ off, crc, (uint32_t)data.size(), fname });
+        }
 
-        ZipLocalHeader lh;
-        lh.crc32 = crc;
-        lh.comp_size = (uint32_t)data.size();
-        lh.uncomp_size = (uint32_t)data.size();
-        lh.name_len = (uint16_t)fname.size();
+        current_count++;
+        current_bytes += data.size();
 
-        // Записываем структуру заголовка
-        f.write((char*)&lh, sizeof(lh));
-        // Записываем имя файла
-        f.write(fname.data(), fname.size());
-        // Записываем данные файла (Payload)
-        f.write(data.data(), data.size());
-
-        // Сохраняем метаданные для CD
-        entries.push_back({ offset, crc, (uint32_t)data.size(), fname });
+        // Индикация прогресса
+        if (current_count % 20 == 0) {
+            std::cout << "\rGenerating: " << current_count << " files | "
+                << (current_bytes / 1024 / 1024) << " MB" << std::flush;
+        }
     }
 
-    // 2. Пишем Central Directory
-    uint32_t cd_start = (uint32_t)f.tellp();
-    for (const auto& e : entries) {
-        ZipDirHeader dh;
-        dh.crc32 = e.crc;
-        dh.comp_size = e.size;
-        dh.uncomp_size = e.size;
-        dh.name_len = (uint16_t)e.name.size();
-        dh.local_offset = e.offset;
-
-        f.write((char*)&dh, sizeof(dh));
-        f.write(e.name.data(), e.name.size());
+    // Завершение ZIP (Central Directory)
+    if (mode == OutputMode::ZIP) {
+        uint32_t cd_start = (uint32_t)f.tellp();
+        for (const auto& e : zip_entries) {
+            ZipDirHeader dh;
+            dh.crc32 = e.crc; dh.comp_size = e.sz; dh.uncomp_size = e.sz;
+            dh.name_len = (uint16_t)e.name.size(); dh.local_offset = e.off;
+            f.write((char*)&dh, sizeof(dh));
+            f.write(e.name.data(), e.name.size());
+        }
+        uint32_t cd_size = (uint32_t)f.tellp() - cd_start;
+        ZipEOCD eocd;
+        eocd.num_dir_this = (uint16_t)zip_entries.size();
+        eocd.num_dir_total = (uint16_t)zip_entries.size();
+        eocd.size_dir = cd_size; eocd.offset_dir = cd_start;
+        f.write((char*)&eocd, sizeof(eocd));
     }
 
-    // Вычисляем размер Central Directory
-    uint32_t cd_size = (uint32_t)f.tellp() - cd_start;
-
-    // 3. Пишем End of Central Directory (EOCD)
-    ZipEOCD eocd;
-    eocd.num_dir_this = (uint16_t)entries.size();
-    eocd.num_dir_total = (uint16_t)entries.size();
-    eocd.size_dir = cd_size;
-    eocd.offset_dir = cd_start;
-
-    f.write((char*)&eocd, sizeof(eocd));
+    std::cout << "\n[Generator] Done. Total: " << current_count << " files, "
+        << (current_bytes / 1024 / 1024) << " MB.\n";
 }
 
-GenStats DataSetGenerator::generate(const std::filesystem::path& path, int count, OutputMode mode, double mix_ratio) {
+GenStats DataSetGenerator::generate_count(const std::filesystem::path& path, int count, OutputMode mode, double mix) {
     GenStats stats;
-    std::cout << "[Generator] Mode: ";
-    switch (mode) {
-    case OutputMode::FOLDER: std::cout << "FOLDER"; break;
-    case OutputMode::BIN: std::cout << "BIN (Concatenation)"; break;
-    case OutputMode::PCAP: std::cout << "PCAP"; break;
-    case OutputMode::ZIP: std::cout << "ZIP (No Compression)"; break;
-    }
-    std::cout << ", Files: " << count << ", Mix: " << mix_ratio << "\n";
+    write_generic(path, count, 0, mode, mix, stats);
+    return stats;
+}
 
-    if (mode == OutputMode::FOLDER) {
-        write_as_folder(path, count, mix_ratio, stats);
-    }
-    else {
-        // Для остальных режимов путь - это файл, а не папка.
-        // Убедимся, что родительская папка существует
-        if (path.has_parent_path()) {
-            std::filesystem::create_directories(path.parent_path());
-        }
-        if (mode == OutputMode::BIN) write_as_bin(path, count, mix_ratio, stats);
-        else if (mode == OutputMode::PCAP) write_as_pcap(path, count, mix_ratio, stats);
-        else if (mode == OutputMode::ZIP) write_as_zip(path, count, mix_ratio, stats);
-    }
-
+GenStats DataSetGenerator::generate_size(const std::filesystem::path& path, int size_mb, OutputMode mode, double mix) {
+    GenStats stats;
+    size_t limit_bytes = (size_t)size_mb * 1024 * 1024;
+    write_generic(path, limit_bytes, 1, mode, mix, stats);
     return stats;
 }
