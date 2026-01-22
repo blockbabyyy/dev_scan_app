@@ -103,7 +103,8 @@ target_link_libraries(RegexBench PRIVATE
 # --- Тесты ---
 add_executable(RegexBenchTests
     tests/ScanerTests.cpp
-    src/Scaner.cpp 
+    src/Scaner.cpp
+    src/generator/Generator.cpp
 )
 
 target_include_directories(RegexBenchTests PRIVATE

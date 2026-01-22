@@ -36,14 +36,18 @@ public:
     DataSetGenerator();
     GenStats generate(const std::string& output_path, size_t total_size_mb, ContainerType type);
 
+public:
+    // Generates a single file content into stream
+    void generate_content(std::ostream& out, size_t size, const FileType& type);
+
+
 private:
     std::vector<FileType> file_types;
     static const std::vector<std::string> dictionary;
 
     std::mt19937 rng;
 
-    // Generates a single file content into stream
-    void generate_content(std::ostream& out, size_t size, const FileType& type);
+   
 
     // Methods per container
     void generate_folder(const std::string& dir, size_t totalBytes, GenStats& stats);
