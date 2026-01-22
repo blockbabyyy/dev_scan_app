@@ -215,27 +215,22 @@ size_t GetMemoryUsage() {
     return 0;
 }
 
-std::string pretty_format(DataSetGenerator::ContainerType type) {
-    if (type == DataSetGenerator::ContainerType::FOLDER) return "Folder";
-    else if (type == DataSetGenerator::ContainerType::ZIP) return "ZIP Archive";
-    else if (type == DataSetGenerator::ContainerType::PCAP) return "PCAP";
+std::string pretty_format(ContainerType type) {
+    if (type == ContainerType::FOLDER) return "Folder";
+    else if (type == ContainerType::ZIP) return "ZIP Archive";
+    else if (type == ContainerType::PCAP) return "PCAP";
     else return "Unknown";
 }
 // вынести Сканер в отдельный файл.
 int main(int argc, char** argv) {
-
-    StdScanner std_scanner;
-    Re2Scanner re2_scanner;
-	BoostScanner boost_scanner;
-	HsScanner hs_scanner;
-
+	
     std::string directory = R"(C:\projects\dev_scan_app\input)";
     ScanStats stats_std, stats_re2, stats_boost, stats_hs;
 
 	GenStats gen_stats;
     
-    DataSetGenerator::ContainerType type = DataSetGenerator::ContainerType::PCAP;
-	size_t gen_size_mb = 40;
+    ContainerType type = ContainerType::FOLDER;
+	size_t gen_size_mb = 5;
     /*
     try {
         // Проверки пути
@@ -300,7 +295,7 @@ int main(int argc, char** argv) {
         if (!fs::exists(directory)) fs::create_directories(directory);
 
         if (fs::is_empty(directory)) {
-            std::cout << "[Main] Generating dataset "<< gen_size_mb <<" " <<pretty_format(type) << " type" << "...\n";
+            std::cout << "[Main] Generating dataset "<< gen_size_mb <<"Mb " <<pretty_format(type) << " type" << "...\n";
             DataSetGenerator generator;
             gen_stats = generator.generate(directory, gen_size_mb, type);
         }

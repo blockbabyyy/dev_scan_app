@@ -1,339 +1,330 @@
 #include <re2/re2.h>
 #include <hs/hs.h>
-
+#include <string_view>
 #include "Scaner.h"
 #include "Signatures.h" 
 
+// --- ScanStats ---
 ScanStats& ScanStats::operator+=(const ScanStats& other) {
-    pdf += other.pdf;
-    doc += other.doc; 
-    xls += other.xls; 
-    ppt += other.ppt; 
-    ole += other.ole;
-    docx += other.docx; 
-    xlsx += other.xlsx; 
-    pptx += other.pptx; 
-    zip += other.zip;
-    rar += other.rar;
-    png += other.png; 
-    jpg += other.jpg; 
-    gif += other.gif; 
-    bmp += other.bmp; 
-    mkv += other.mkv; 
-    mp3 += other.mp3;
-    html += other.html; 
-    xml += other.xml; 
-    json += other.json; 
-    eml += other.eml;
+    pdf += other.pdf; doc += other.doc; xls += other.xls; ppt += other.ppt; ole += other.ole;
+    docx += other.docx; xlsx += other.xlsx; pptx += other.pptx; zip += other.zip;
+    rar += other.rar; png += other.png; jpg += other.jpg; gif += other.gif; bmp += other.bmp;
+    mkv += other.mkv; mp3 += other.mp3;
+    html += other.html; xml += other.xml; json += other.json; eml += other.eml;
     unknown += other.unknown;
-
     return *this;
 }
 
-void ScanStats::print(const std::string& engine_name) const {
-    std::cout << "===== " << engine_name << " Results =====" << std::endl;
-    std::cout << "[Docs (Old)]\n"
-        << "  DOC: " << doc << " | XLS: " << xls << " | PPT: " << ppt
-        << " | Generic OLE: " << ole << "\n";
-    std::cout << "[Docs (OpenXML)]\n"
-        << "  DOCX: " << docx << " | XLSX: " << xlsx << " | PPTX: " << pptx << "\n";
-    std::cout << "[Archives]\n"
-        << " ZIP: " << zip << " | PDF: " << pdf << " | RAR: " << rar << "\n";
-    std::cout << "[Media]\n"
-        << "  PNG: " << png << " | JPG: " << jpg << " | GIF: " << gif
-        << " | BMP: " << bmp << " | MKV: " << mkv << " | MP3: " << mp3 << "\n";
-    std::cout << "[Text]\n"
-        << "  HTML: " << html << " | XML: " << xml
-        << " | JSON: " << json << " | EML: " << eml << "\n";
-    std::cout << "[Other]\n  Unknown: " << unknown << std::endl;
+void ScanStats::print(const std::string& name) const {
+    std::cout << "===== " << name << " Results =====" << std::endl;
+    std::cout << "PDF: " << pdf << " | ZIP: " << zip << " | RAR: " << rar << "\n";
+    std::cout << "Office: " << (doc + xls + ppt) << " (OLE) | " << (docx + xlsx + pptx) << " (XML)\n";
+    std::cout << "Images: " << (png + jpg + gif + bmp) << " | Media: " << (mkv + mp3) << "\n";
+    std::cout << "Text: HTML=" << html << " XML=" << xml << " JSON=" << json << " EML=" << eml << "\n";
     std::cout << "========================================" << std::endl;
 }
 
+void compare_stats(const GenStats& gen, const ScanStats& scan, const std::string& name) {
+    std::cout << "\n>>> Check: " << name << " <<<\n";
+    std::cout << "Total Gen: " << gen.total_files << "\n";
+}
 
-void compare_stats(const GenStats& gen, const ScanStats& scan, const std::string& engine_name) {
-    std::cout << "\n>>> COMPARISON REPORT (" << engine_name << ") <<<\n";
+// --- Helpers ---
+inline bool has_sig(const char* data, size_t size, const std::string& signature) {
+    if (signature.empty()) return true;
+    std::string_view sv(data, size);
+    return sv.find(signature) != std::string_view::npos;
+}
 
-    auto check = [](const std::string& label, int expected, int actual) {
-        std::cout << std::left << std::setw(20) << label
-            << " Generated: " << std::setw(5) << expected
-            << " Found: " << std::setw(5) << actual;
-        if (expected == actual) std::cout << " [OK]";
-        else std::cout << " [MISMATCH] (" << (actual - expected) << ")";
-        std::cout << std::endl;
-        };
+// Regex Counters
+template<typename SearchFunc>
+int count_matches_std(const char* data, size_t size, const std::regex& re, SearchFunc searcher) {
+    int count = 0;
+    const char* start = data;
+    const char* end = data + size;
+    std::cmatch m;
+    try {
+        while (start < end && searcher(start, end, m, re)) {
+            count++;
+            auto shift = std::max((std::ptrdiff_t)1, m.length());
+            start += m.position() + shift;
+        }
+    }
+    catch (...) {}
+    return count;
+}
 
-    check("PDF", gen.pdf, scan.pdf);
+template<typename SearchFunc>
+int count_matches_boost(const char* data, size_t size, const boost::regex& re, SearchFunc searcher) {
+    int count = 0;
+    const char* start = data;
+    const char* end = data + size;
+    boost::cmatch m;
+    while (start < end && searcher(start, end, m, re)) {
+        count++;
+        auto shift = std::max((std::ptrdiff_t)1, m.length());
+        start += m.position() + shift;
+    }
+    return count;
+}
 
-    int scan_ole_total = scan.doc + scan.xls + scan.ppt + scan.ole;
-    check("Old Office (OLE)", gen.office_ole, scan_ole_total);
-
-    int scan_xml_total = scan.docx + scan.xlsx + scan.pptx;
-    check("New Office (XML)", gen.office_xml, scan_xml_total);
-
-    check("Pure ZIP", gen.zip, scan.zip);
-    check("RAR", gen.rar, scan.rar);
-
-    check("PNG", gen.png, scan.png);
-    check("JPG", gen.jpg, scan.jpg);
-    check("GIF", gen.gif, scan.gif);
-    check("BMP", gen.bmp, scan.bmp);
-    check("MKV", gen.mkv, scan.mkv);
-    check("MP3", gen.mp3, scan.mp3);
-
-    check("HTML", gen.html, scan.html);
-    check("XML", gen.xml, scan.xml);
-    check("JSON", gen.json, scan.json);
-    check("EML", gen.eml, scan.eml);
-
-    std::cout << "--------------------------------------------------\n";
-    std::cout << "Total Generated: " << gen.total_files << "\n";
-    std::cout << "Total Unknown (scanned): " << scan.unknown << " (Expected ~" << gen.txt << " txt files)\n";
-    std::cout << "==================================================\n";
+int count_re2(const char* data, size_t size, re2::RE2* re) {
+    int count = 0;
+    re2::StringPiece input(data, size);
+    while (re2::RE2::FindAndConsume(&input, *re)) count++;
+    return count;
 }
 
 // ==========================================
 // StdScanner
 // ==========================================
-
 StdScanner::StdScanner() {
     auto f = std::regex::optimize;
     auto fi = std::regex::optimize | std::regex::icase;
 
+    // OLE & XML
     r_doc.assign(Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD), f);
     r_xls.assign(Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL), f);
     r_ppt.assign(Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT), f);
+    r_docx.assign(Sig::complex(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_WORD), f);
+    r_xlsx.assign(Sig::complex(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_XL), f);
+    r_pptx.assign(Sig::complex(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_PPT), f);
 
-    r_docx.assign(Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_WORD), f);
-    r_xlsx.assign(Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_XL), f);
-    r_pptx.assign(Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_PPT), f);
+    // Framed (is_hs = false)
+    r_zip.assign(Sig::framed(Sig::Bin::ZIP_HEAD, Sig::Bin::ZIP_TAIL, false), f);
+    r_pdf.assign(Sig::framed(Sig::Bin::PDF_HEAD, Sig::Bin::PDF_TAIL, false), f);
 
-    r_pdf.assign( Sig::raw_to_hex(Sig::Bin::PDF), f);
-    r_zip.assign( Sig::raw_to_hex(Sig::Bin::ZIP), f);
-    r_rar4.assign( Sig::raw_to_hex(Sig::Bin::RAR4), f);
-    r_rar5.assign( Sig::raw_to_hex(Sig::Bin::RAR5), f);
+    r_png.assign(Sig::framed(Sig::Bin::PNG_HEAD, Sig::Bin::PNG_TAIL, false), f);
+    r_jpg.assign(Sig::framed(Sig::Bin::JPG_HEAD, Sig::Bin::JPG_TAIL, false), f);
+    r_gif.assign(Sig::framed(Sig::Bin::GIF_HEAD, Sig::Bin::GIF_TAIL, false), f);
 
-    r_png.assign( Sig::raw_to_hex(Sig::Bin::PNG), f);
-    r_jpg.assign( Sig::raw_to_hex(Sig::Bin::JPG), f);
-    r_gif.assign( Sig::raw_to_hex(Sig::Bin::GIF), f);
-    r_bmp.assign( Sig::raw_to_hex(Sig::Bin::BMP), f);
-    r_mkv.assign( Sig::raw_to_hex(Sig::Bin::MKV), f);
-    r_mp3.assign( Sig::raw_to_hex(Sig::Bin::MP3), f);
+    r_html.assign(Sig::framed_text(Sig::Text::HTML_HEAD, Sig::Text::HTML_TAIL, false), fi);
+    r_json.assign(Sig::framed_text(Sig::Text::JSON_HEAD, Sig::Text::JSON_TAIL, false), f);
 
-    r_html.assign( Sig::raw_to_hex(Sig::Text::HTML), fi);
-    r_xml.assign( Sig::raw_to_hex(Sig::Text::XML), fi);
-    r_json.assign( Sig::raw_to_hex(Sig::Text::JSON), f);
-    r_eml.assign( Sig::raw_to_hex(Sig::Text::EML), fi);
+    // Simple
+    r_rar4.assign(Sig::raw_to_hex(Sig::Bin::RAR4), f);
+    r_rar5.assign(Sig::raw_to_hex(Sig::Bin::RAR5), f);
+    // BMP теперь Regex, а не Hex, т.к. там есть точки
+    r_bmp.assign(Sig::Bin::BMP_HEAD, f);
+    r_mkv.assign(Sig::raw_to_hex(Sig::Bin::MKV), f);
+    r_mp3.assign(Sig::raw_to_hex(Sig::Bin::MP3), f);
+    r_xml.assign(Sig::Text::XML, fi);
+    r_eml.assign(Sig::Text::EML, fi);
 }
-
 std::string StdScanner::name() const { return "std::regex"; }
 
 void StdScanner::scan(const char* d, size_t s, ScanStats& st) {
-    std::cmatch m; auto end = d + s;
-    // std::regex_search может быть медленным для бинарных данных, но такова реализация
-    if (std::regex_search(d, end, m, r_doc))  st.doc++;
-    else if (std::regex_search(d, end, m, r_xls))  st.xls++;
-    else if (std::regex_search(d, end, m, r_ppt))  st.ppt++;
+    auto searcher = [](const char* start, const char* end, std::cmatch& m, const std::regex& re) {
+        return std::regex_search(start, end, m, re);
+        };
+    if (has_sig(d, s, Sig::Bin::OLE)) {
+        st.doc += count_matches_std(d, s, r_doc, searcher);
+        st.xls += count_matches_std(d, s, r_xls, searcher);
+        st.ppt += count_matches_std(d, s, r_ppt, searcher);
+    }
+    if (has_sig(d, s, Sig::Bin::ZIP_HEAD)) {
+        st.docx += count_matches_std(d, s, r_docx, searcher);
+        st.xlsx += count_matches_std(d, s, r_xlsx, searcher);
+        st.pptx += count_matches_std(d, s, r_pptx, searcher);
+        st.zip += count_matches_std(d, s, r_zip, searcher);
+    }
+    if (has_sig(d, s, Sig::Bin::PDF_HEAD)) st.pdf += count_matches_std(d, s, r_pdf, searcher);
+    if (has_sig(d, s, Sig::Bin::RAR4)) st.rar += count_matches_std(d, s, r_rar4, searcher);
+    if (has_sig(d, s, Sig::Bin::RAR5)) st.rar += count_matches_std(d, s, r_rar5, searcher);
 
-    else if (std::regex_search(d, end, m, r_docx)) st.docx++;
-    else if (std::regex_search(d, end, m, r_xlsx)) st.xlsx++;
-    else if (std::regex_search(d, end, m, r_pptx)) st.pptx++;
+    if (has_sig(d, s, Sig::Bin::PNG_HEAD)) st.png += count_matches_std(d, s, r_png, searcher);
+    if (has_sig(d, s, Sig::Bin::JPG_HEAD)) st.jpg += count_matches_std(d, s, r_jpg, searcher);
+    if (has_sig(d, s, Sig::Bin::GIF_HEAD)) st.gif += count_matches_std(d, s, r_gif, searcher);
+    // BMP без префильтра, т.к. сигнатура теперь сложнее (regex)
+    st.bmp += count_matches_std(d, s, r_bmp, searcher);
 
-    else if (std::regex_search(d, end, m, r_zip)) st.zip++;
-    else if (std::regex_search(d, end, m, r_pdf)) st.pdf++;
-    else if (std::regex_search(d, end, m, r_rar4) || std::regex_search(d, end, m, r_rar5)) st.rar++;
-    else if (std::regex_search(d, end, m, r_png)) st.png++;
-    else if (std::regex_search(d, end, m, r_jpg)) st.jpg++;
-    else if (std::regex_search(d, end, m, r_gif)) st.gif++;
-    else if (std::regex_search(d, end, m, r_bmp)) st.bmp++;
-    else if (std::regex_search(d, end, m, r_mkv)) st.mkv++;
-    else if (std::regex_search(d, end, m, r_mp3)) st.mp3++;
-    else if (std::regex_search(d, end, m, r_html)) st.html++;
-    else if (std::regex_search(d, end, m, r_xml)) st.xml++;
-    else if (std::regex_search(d, end, m, r_json)) st.json++;
-    else if (std::regex_search(d, end, m, r_eml)) st.eml++;
-    else st.unknown++;
+    if (has_sig(d, s, Sig::Bin::MKV)) st.mkv += count_matches_std(d, s, r_mkv, searcher);
+    if (has_sig(d, s, Sig::Bin::MP3)) st.mp3 += count_matches_std(d, s, r_mp3, searcher);
+
+    st.html += count_matches_std(d, s, r_html, searcher);
+    st.xml += count_matches_std(d, s, r_xml, searcher);
+    st.json += count_matches_std(d, s, r_json, searcher);
+    st.eml += count_matches_std(d, s, r_eml, searcher);
 }
 
 // ==========================================
 // Re2Scanner
 // ==========================================
-
 Re2Scanner::Re2Scanner() {
     re2::RE2::Options ob;
     ob.set_encoding(re2::RE2::Options::EncodingLatin1);
     ob.set_log_errors(false);
     ob.set_dot_nl(true);
+    // ВАЖНО: Увеличиваем лимит памяти до 64 МБ, иначе поиск с гэпом 4МБ может падать
+    ob.set_max_mem(64 << 20);
 
-    re2::RE2::Options ot = ob;
-    ot.set_case_sensitive(false);
+    re2::RE2::Options ot = ob; ot.set_case_sensitive(false);
 
-    // Используем std::make_unique для создания объектов RE2 в куче
-    r_doc = std::make_unique<re2::RE2>( Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD), ob);
-    r_xls = std::make_unique<re2::RE2>( Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL), ob);
-    r_ppt = std::make_unique<re2::RE2>( Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT), ob);
-    r_ole_gen = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::OLE), ob);
+    r_doc = std::make_unique<re2::RE2>(Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD), ob);
+    r_xls = std::make_unique<re2::RE2>(Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL), ob);
+    r_ppt = std::make_unique<re2::RE2>(Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT), ob);
+    r_docx = std::make_unique<re2::RE2>(Sig::complex(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_WORD), ob);
+    r_xlsx = std::make_unique<re2::RE2>(Sig::complex(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_XL), ob);
+    r_pptx = std::make_unique<re2::RE2>(Sig::complex(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_PPT), ob);
 
-    r_docx = std::make_unique<re2::RE2>( Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_WORD), ob);
-    r_xlsx = std::make_unique<re2::RE2>( Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_XL), ob);
-    r_pptx = std::make_unique<re2::RE2>( Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_PPT), ob);
-    r_zip_gen = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::ZIP), ob);
+    // is_hs = false
+    r_zip_gen = std::make_unique<re2::RE2>(Sig::framed(Sig::Bin::ZIP_HEAD, Sig::Bin::ZIP_TAIL, false), ob);
+    r_pdf = std::make_unique<re2::RE2>(Sig::framed(Sig::Bin::PDF_HEAD, Sig::Bin::PDF_TAIL, false), ob);
+    r_rar4 = std::make_unique<re2::RE2>(Sig::raw_to_hex(Sig::Bin::RAR4), ob);
+    r_rar5 = std::make_unique<re2::RE2>(Sig::raw_to_hex(Sig::Bin::RAR5), ob);
+    r_png = std::make_unique<re2::RE2>(Sig::framed(Sig::Bin::PNG_HEAD, Sig::Bin::PNG_TAIL, false), ob);
+    r_jpg = std::make_unique<re2::RE2>(Sig::framed(Sig::Bin::JPG_HEAD, Sig::Bin::JPG_TAIL, false), ob);
+    r_gif = std::make_unique<re2::RE2>(Sig::framed(Sig::Bin::GIF_HEAD, Sig::Bin::GIF_TAIL, false), ob);
 
-    r_pdf = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::PDF), ob);
-    r_rar4 = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::RAR4), ob);
-    r_rar5 = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::RAR5), ob);
+    r_bmp = std::make_unique<re2::RE2>(Sig::Bin::BMP_HEAD, ob);
+    r_mkv = std::make_unique<re2::RE2>(Sig::raw_to_hex(Sig::Bin::MKV), ob);
+    r_mp3 = std::make_unique<re2::RE2>(Sig::raw_to_hex(Sig::Bin::MP3), ob);
 
-    r_png = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::PNG), ob);
-    r_jpg = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::JPG), ob);
-    r_gif = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::GIF), ob);
-    r_bmp = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::BMP), ob);
-    r_mkv = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::MKV), ob);
-    r_mp3 = std::make_unique<re2::RE2>( Sig::raw_to_hex(Sig::Bin::MP3), ob);
-
-    r_html = std::make_unique<re2::RE2>( Sig::Text::HTML, ot);
-    r_xml = std::make_unique<re2::RE2>( Sig::Text::XML, ot);
-    r_json = std::make_unique<re2::RE2>( Sig::Text::JSON, ob);
-    r_eml = std::make_unique<re2::RE2>( Sig::Text::EML, ot);
+    r_html = std::make_unique<re2::RE2>(Sig::framed_text(Sig::Text::HTML_HEAD, Sig::Text::HTML_TAIL, false), ot);
+    r_xml = std::make_unique<re2::RE2>(Sig::Text::XML, ot);
+    r_json = std::make_unique<re2::RE2>(Sig::framed_text(Sig::Text::JSON_HEAD, Sig::Text::JSON_TAIL, false), ob);
+    r_eml = std::make_unique<re2::RE2>(Sig::Text::EML, ot);
 }
-
-
 Re2Scanner::~Re2Scanner() = default;
-
 std::string Re2Scanner::name() const { return "Google RE2"; }
 
 void Re2Scanner::scan(const char* d, size_t s, ScanStats& st) {
-    re2::StringPiece p(d, s);
-    // Используем *r_ptr для разыменования unique_ptr
-    if (re2::RE2::PartialMatch(p, *r_doc)) st.doc++;
-    else if (re2::RE2::PartialMatch(p, *r_xls)) st.xls++;
-    else if (re2::RE2::PartialMatch(p, *r_ppt)) st.ppt++;
-    else if (re2::RE2::PartialMatch(p, *r_ole_gen)) st.ole++;
+    if (has_sig(d, s, Sig::Bin::OLE)) {
+        st.doc += count_re2(d, s, r_doc.get());
+        st.xls += count_re2(d, s, r_xls.get());
+        st.ppt += count_re2(d, s, r_ppt.get());
+    }
+    if (has_sig(d, s, Sig::Bin::ZIP_HEAD)) {
+        st.docx += count_re2(d, s, r_docx.get());
+        st.xlsx += count_re2(d, s, r_xlsx.get());
+        st.pptx += count_re2(d, s, r_pptx.get());
+        st.zip += count_re2(d, s, r_zip_gen.get());
+    }
+    if (has_sig(d, s, Sig::Bin::PDF_HEAD)) st.pdf += count_re2(d, s, r_pdf.get());
+    if (has_sig(d, s, Sig::Bin::RAR4)) st.rar += count_re2(d, s, r_rar4.get());
+    if (has_sig(d, s, Sig::Bin::RAR5)) st.rar += count_re2(d, s, r_rar5.get());
 
-    else if (re2::RE2::PartialMatch(p, *r_docx)) st.docx++;
-    else if (re2::RE2::PartialMatch(p, *r_xlsx)) st.xlsx++;
-    else if (re2::RE2::PartialMatch(p, *r_pptx)) st.pptx++;
-    else if (re2::RE2::PartialMatch(p, *r_zip_gen)) st.zip++;
+    if (has_sig(d, s, Sig::Bin::PNG_HEAD)) st.png += count_re2(d, s, r_png.get());
+    if (has_sig(d, s, Sig::Bin::JPG_HEAD)) st.jpg += count_re2(d, s, r_jpg.get());
+    if (has_sig(d, s, Sig::Bin::GIF_HEAD)) st.gif += count_re2(d, s, r_gif.get());
 
-    else if (re2::RE2::PartialMatch(p, *r_pdf)) st.pdf++;
-    else if (re2::RE2::PartialMatch(p, *r_rar4) || re2::RE2::PartialMatch(p, *r_rar5)) st.rar++;
-    else if (re2::RE2::PartialMatch(p, *r_png)) st.png++;
-    else if (re2::RE2::PartialMatch(p, *r_jpg)) st.jpg++;
-    else if (re2::RE2::PartialMatch(p, *r_gif)) st.gif++;
-    else if (re2::RE2::PartialMatch(p, *r_bmp)) st.bmp++;
-    else if (re2::RE2::PartialMatch(p, *r_mkv)) st.mkv++;
-    else if (re2::RE2::PartialMatch(p, *r_mp3)) st.mp3++;
-    else if (re2::RE2::PartialMatch(p, *r_html)) st.html++;
-    else if (re2::RE2::PartialMatch(p, *r_xml)) st.xml++;
-    else if (re2::RE2::PartialMatch(p, *r_json)) st.json++;
-    else if (re2::RE2::PartialMatch(p, *r_eml)) st.eml++;
-    else st.unknown++;
+    st.bmp += count_re2(d, s, r_bmp.get());
+    if (has_sig(d, s, Sig::Bin::MKV)) st.mkv += count_re2(d, s, r_mkv.get());
+    if (has_sig(d, s, Sig::Bin::MP3)) st.mp3 += count_re2(d, s, r_mp3.get());
+
+    st.html += count_re2(d, s, r_html.get());
+    st.xml += count_re2(d, s, r_xml.get());
+    st.json += count_re2(d, s, r_json.get());
+    st.eml += count_re2(d, s, r_eml.get());
 }
 
 // ==========================================
 // BoostScanner
 // ==========================================
-
 BoostScanner::BoostScanner() {
     auto flags_bin = boost::regex::perl;
     auto flags_text = boost::regex::perl | boost::regex::icase;
 
-    r_doc.assign( Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD), flags_bin);
-    r_xls.assign( Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL), flags_bin);
-    r_ppt.assign( Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT), flags_bin);
-    r_ole_gen.assign( Sig::raw_to_hex(Sig::Bin::OLE), flags_bin);
+    r_doc.assign(Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD), flags_bin);
+    r_xls.assign(Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL), flags_bin);
+    r_ppt.assign(Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT), flags_bin);
+    r_docx.assign(Sig::complex(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_WORD), flags_bin);
+    r_xlsx.assign(Sig::complex(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_XL), flags_bin);
+    r_pptx.assign(Sig::complex(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_PPT), flags_bin);
 
-    r_docx.assign( Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_WORD), flags_bin);
-    r_xlsx.assign( Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_XL), flags_bin);
-    r_pptx.assign( Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_PPT), flags_bin);
-    r_zip_gen.assign( Sig::raw_to_hex(Sig::Bin::ZIP), flags_bin);
+    // is_hs = false
+    r_zip_gen.assign(Sig::framed(Sig::Bin::ZIP_HEAD, Sig::Bin::ZIP_TAIL, false), flags_bin);
+    r_pdf.assign(Sig::framed(Sig::Bin::PDF_HEAD, Sig::Bin::PDF_TAIL, false), flags_bin);
+    r_rar4.assign(Sig::raw_to_hex(Sig::Bin::RAR4), flags_bin);
+    r_rar5.assign(Sig::raw_to_hex(Sig::Bin::RAR5), flags_bin);
 
-    r_pdf.assign( Sig::raw_to_hex(Sig::Bin::PDF), flags_bin);
-    r_rar4.assign( Sig::raw_to_hex(Sig::Bin::RAR4), flags_bin);
-    r_rar5.assign( Sig::raw_to_hex(Sig::Bin::RAR5), flags_bin);
+    r_png.assign(Sig::framed(Sig::Bin::PNG_HEAD, Sig::Bin::PNG_TAIL, false), flags_bin);
+    r_jpg.assign(Sig::framed(Sig::Bin::JPG_HEAD, Sig::Bin::JPG_TAIL, false), flags_bin);
+    r_gif.assign(Sig::framed(Sig::Bin::GIF_HEAD, Sig::Bin::GIF_TAIL, false), flags_bin);
 
-    r_png.assign( Sig::raw_to_hex(Sig::Bin::PNG), flags_bin);
-    r_jpg.assign( Sig::raw_to_hex(Sig::Bin::JPG), flags_bin);
-    r_gif.assign( Sig::raw_to_hex(Sig::Bin::GIF), flags_bin);
-    r_bmp.assign( Sig::raw_to_hex(Sig::Bin::BMP), flags_bin);
-    r_mkv.assign( Sig::raw_to_hex(Sig::Bin::MKV), flags_bin);
-    r_mp3.assign( Sig::raw_to_hex(Sig::Bin::MP3), flags_bin);
+    r_bmp.assign(Sig::Bin::BMP_HEAD, flags_bin);
+    r_mkv.assign(Sig::raw_to_hex(Sig::Bin::MKV), flags_bin);
+    r_mp3.assign(Sig::raw_to_hex(Sig::Bin::MP3), flags_bin);
 
-    r_html.assign( Sig::Text::HTML, flags_text);
-    r_xml.assign( Sig::Text::XML, flags_text);
-    r_json.assign( Sig::Text::JSON, flags_bin);
-    r_eml.assign( Sig::Text::EML, flags_text);
+    r_html.assign(Sig::framed_text(Sig::Text::HTML_HEAD, Sig::Text::HTML_TAIL, false), flags_text);
+    r_xml.assign(Sig::Text::XML, flags_text);
+    r_json.assign(Sig::framed_text(Sig::Text::JSON_HEAD, Sig::Text::JSON_TAIL, false), flags_bin);
+    r_eml.assign(Sig::Text::EML, flags_text);
 }
-
 std::string BoostScanner::name() const { return "Boost.Regex"; }
 
 void BoostScanner::scan(const char* d, size_t s, ScanStats& st) {
-    // Boost regex_search принимает итераторы
-    if (boost::regex_search(d, d + s, r_doc)) st.doc++;
-    else if (boost::regex_search(d, d + s, r_xls)) st.xls++;
-    else if (boost::regex_search(d, d + s, r_ppt)) st.ppt++;
-    else if (boost::regex_search(d, d + s, r_ole_gen)) st.ole++;
+    auto searcher = [](const char* start, const char* end, boost::cmatch& m, const boost::regex& re) {
+        return boost::regex_search(start, end, m, re);
+        };
+    if (has_sig(d, s, Sig::Bin::OLE)) {
+        st.doc += count_matches_boost(d, s, r_doc, searcher);
+        st.xls += count_matches_boost(d, s, r_xls, searcher);
+        st.ppt += count_matches_boost(d, s, r_ppt, searcher);
+    }
+    if (has_sig(d, s, Sig::Bin::ZIP_HEAD)) {
+        st.docx += count_matches_boost(d, s, r_docx, searcher);
+        st.xlsx += count_matches_boost(d, s, r_xlsx, searcher);
+        st.pptx += count_matches_boost(d, s, r_pptx, searcher);
+        st.zip += count_matches_boost(d, s, r_zip_gen, searcher);
+    }
+    if (has_sig(d, s, Sig::Bin::PDF_HEAD)) st.pdf += count_matches_boost(d, s, r_pdf, searcher);
+    if (has_sig(d, s, Sig::Bin::RAR4)) st.rar += count_matches_boost(d, s, r_rar4, searcher);
+    if (has_sig(d, s, Sig::Bin::RAR5)) st.rar += count_matches_boost(d, s, r_rar5, searcher);
 
-    else if (boost::regex_search(d, d + s, r_docx)) st.docx++;
-    else if (boost::regex_search(d, d + s, r_xlsx)) st.xlsx++;
-    else if (boost::regex_search(d, d + s, r_pptx)) st.pptx++;
-    else if (boost::regex_search(d, d + s, r_zip_gen)) st.zip++;
+    if (has_sig(d, s, Sig::Bin::PNG_HEAD)) st.png += count_matches_boost(d, s, r_png, searcher);
+    if (has_sig(d, s, Sig::Bin::JPG_HEAD)) st.jpg += count_matches_boost(d, s, r_jpg, searcher);
+    if (has_sig(d, s, Sig::Bin::GIF_HEAD)) st.gif += count_matches_boost(d, s, r_gif, searcher);
 
-    else if (boost::regex_search(d, d + s, r_pdf)) st.pdf++;
-    else if (boost::regex_search(d, d + s, r_rar4) || boost::regex_search(d, d + s, r_rar5)) st.rar++;
-    else if (boost::regex_search(d, d + s, r_png)) st.png++;
-    else if (boost::regex_search(d, d + s, r_jpg)) st.jpg++;
-    else if (boost::regex_search(d, d + s, r_gif)) st.gif++;
-    else if (boost::regex_search(d, d + s, r_bmp)) st.bmp++;
-    else if (boost::regex_search(d, d + s, r_mkv)) st.mkv++;
-    else if (boost::regex_search(d, d + s, r_mp3)) st.mp3++;
-    else if (boost::regex_search(d, d + s, r_html)) st.html++;
-    else if (boost::regex_search(d, d + s, r_xml)) st.xml++;
-    else if (boost::regex_search(d, d + s, r_json)) st.json++;
-    else if (boost::regex_search(d, d + s, r_eml)) st.eml++;
-    else st.unknown++;
+    st.bmp += count_matches_boost(d, s, r_bmp, searcher);
+    if (has_sig(d, s, Sig::Bin::MKV)) st.mkv += count_matches_boost(d, s, r_mkv, searcher);
+    if (has_sig(d, s, Sig::Bin::MP3)) st.mp3 += count_matches_boost(d, s, r_mp3, searcher);
+
+    st.html += count_matches_boost(d, s, r_html, searcher);
+    st.xml += count_matches_boost(d, s, r_xml, searcher);
+    st.json += count_matches_boost(d, s, r_json, searcher);
+    st.eml += count_matches_boost(d, s, r_eml, searcher);
 }
 
 // ==========================================
-// HsScanner (Hyperscan)
+// HsScanner
 // ==========================================
-
 HsScanner::HsScanner() {
-    // Подготовка паттернов
-    std::string p_doc =  Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD);
-    std::string p_xls =  Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL);
-    std::string p_ppt =  Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT);
-    std::string p_ole =  Sig::raw_to_hex(Sig::Bin::OLE);
+    std::string p_doc = Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_WORD);
+    std::string p_xls = Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_XL);
+    std::string p_ppt = Sig::complex(Sig::Bin::OLE, Sig::Bin::OLE_PPT);
+    std::string p_docx = Sig::complex(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_WORD);
+    std::string p_xlsx = Sig::complex(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_XL);
+    std::string p_pptx = Sig::complex(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_PPT);
 
-    std::string p_docx =  Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_WORD);
-    std::string p_xlsx =  Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_XL);
-    std::string p_pptx =  Sig::complex(Sig::Bin::ZIP, Sig::Bin::XML_PPT);
-    std::string p_zip =  Sig::raw_to_hex(Sig::Bin::ZIP);
+    // is_hs = true (чистый regex)
+    std::string p_zip = Sig::framed(Sig::Bin::ZIP_HEAD, Sig::Bin::ZIP_TAIL, true);
+    std::string p_pdf = Sig::framed(Sig::Bin::PDF_HEAD, Sig::Bin::PDF_TAIL, true);
+    std::string p_rar4 = Sig::raw_to_hex(Sig::Bin::RAR4);
+    std::string p_rar5 = Sig::raw_to_hex(Sig::Bin::RAR5);
 
-    std::string p_pdf =  Sig::raw_to_hex(Sig::Bin::PDF);
-    std::string p_rar4 =  Sig::raw_to_hex(Sig::Bin::RAR4);
-    std::string p_rar5 =  Sig::raw_to_hex(Sig::Bin::RAR5);
+    std::string p_png = Sig::framed(Sig::Bin::PNG_HEAD, Sig::Bin::PNG_TAIL, true);
+    std::string p_jpg = Sig::framed(Sig::Bin::JPG_HEAD, Sig::Bin::JPG_TAIL, true);
+    std::string p_gif = Sig::framed(Sig::Bin::GIF_HEAD, Sig::Bin::GIF_TAIL, true);
 
-    std::string p_png =  Sig::raw_to_hex(Sig::Bin::PNG);
-    std::string p_jpg =  Sig::raw_to_hex(Sig::Bin::JPG);
-    std::string p_gif =  Sig::raw_to_hex(Sig::Bin::GIF);
-    std::string p_bmp =  Sig::raw_to_hex(Sig::Bin::BMP);
-    std::string p_mkv =  Sig::raw_to_hex(Sig::Bin::MKV);
-    std::string p_mp3 =  Sig::raw_to_hex(Sig::Bin::MP3);
+    std::string p_bmp = Sig::Bin::BMP_HEAD;
+    std::string p_mkv = Sig::raw_to_hex(Sig::Bin::MKV);
+    std::string p_mp3 = Sig::raw_to_hex(Sig::Bin::MP3);
 
-    std::string p_html =  Sig::Text::HTML;
-    std::string p_xml =  Sig::Text::XML;
-    std::string p_json =  Sig::Text::JSON;
-    std::string p_eml =  Sig::Text::EML;
+    std::string p_html = Sig::framed_text(Sig::Text::HTML_HEAD, Sig::Text::HTML_TAIL, true);
+    std::string p_xml = Sig::Text::XML;
+    std::string p_json = Sig::framed_text(Sig::Text::JSON_HEAD, Sig::Text::JSON_TAIL, true);
+    std::string p_eml = Sig::Text::EML;
 
     const char* exprs[] = {
-        p_doc.c_str(), p_xls.c_str(), p_ppt.c_str(), p_ole.c_str(),
+        p_doc.c_str(), p_xls.c_str(), p_ppt.c_str(),
         p_docx.c_str(), p_xlsx.c_str(), p_pptx.c_str(), p_zip.c_str(),
         p_pdf.c_str(), p_rar4.c_str(), p_rar5.c_str(),
         p_png.c_str(), p_jpg.c_str(), p_gif.c_str(), p_bmp.c_str(), p_mkv.c_str(), p_mp3.c_str(),
         p_html.c_str(), p_xml.c_str(), p_json.c_str(), p_eml.c_str()
     };
-
     unsigned int ids[] = {
-        ID_DOC, ID_XLS, ID_PPT, ID_OLE,
+        ID_DOC, ID_XLS, ID_PPT,
         ID_DOCX, ID_XLSX, ID_PPTX, ID_ZIP,
         ID_PDF, ID_RAR, ID_RAR,
         ID_PNG, ID_JPG, ID_GIF, ID_BMP, ID_MKV, ID_MP3,
@@ -341,77 +332,36 @@ HsScanner::HsScanner() {
     };
 
     std::vector<unsigned int> flags;
-
-    for (int i = 0; i < 17; ++i) flags.push_back(HS_FLAG_DOTALL); // Бинарные
-    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8); // HTML
-    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8); // XML
-    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_UTF8);                    // JSON
-    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8); // EML
+    for (int i = 0; i < 16; ++i) flags.push_back(HS_FLAG_DOTALL);
+    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8);
+    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8);
+    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_UTF8);
+    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8);
 
     hs_compile_error_t* err;
-    if (hs_compile_multi(exprs, flags.data(), ids, 21, HS_MODE_BLOCK, nullptr, &db, &err) != HS_SUCCESS) {
+    if (hs_compile_multi(exprs, flags.data(), ids, 20, HS_MODE_BLOCK, nullptr, &db, &err) != HS_SUCCESS) {
         std::cerr << "HS Error: " << err->message << std::endl;
         hs_free_compile_error(err);
     }
 }
-
-HsScanner::~HsScanner() {
-    // Важно освободить ресурсы C-библиотеки
-    if (scratch) hs_free_scratch(scratch);
-    if (db) hs_free_database(db);
-}
-
-void HsScanner::prepare() {
-    if (db && !scratch) {
-        hs_alloc_scratch(db, &scratch); // выделяем память для сканирования один раз
-    }
-}
-
+HsScanner::~HsScanner() { if (scratch) hs_free_scratch(scratch); if (db) hs_free_database(db); }
+void HsScanner::prepare() { if (db && !scratch) hs_alloc_scratch(db, &scratch); }
 std::string HsScanner::name() const { return "Hyperscan"; }
 
 void HsScanner::scan(const char* data, size_t size, ScanStats& stats) {
     if (!db || !scratch) return;
-
-    int best_id = 0;
-
-    // Лямбда для обратного вызова Hyperscan
-    auto on_match = [](unsigned int id, unsigned long long, unsigned long long, unsigned int, void* ctx) -> int {
-        int* current = static_cast<int*>(ctx);
-        // Приоритезация: если нашли специфичный формат (например, DOCX), перезаписываем общий (ZIP)
-        bool is_specific = (id == ID_DOC || id == ID_XLS || id == ID_PPT ||
-            id == ID_DOCX || id == ID_XLSX || id == ID_PPTX);
-
-        if (*current == 0) *current = id;
-        else if (is_specific) *current = id;
-
-        return 0; // 0 - продолжить поиск
+    auto on_match = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* ctx) -> int {
+        ScanStats* st = static_cast<ScanStats*>(ctx);
+        switch (id) {
+        case ID_DOC: st->doc++; break; case ID_XLS: st->xls++; break; case ID_PPT: st->ppt++; break;
+        case ID_DOCX: st->docx++; break; case ID_XLSX: st->xlsx++; break; case ID_PPTX: st->pptx++; break;
+        case ID_ZIP: st->zip++; break; case ID_PDF: st->pdf++; break; case ID_RAR: st->rar++; break;
+        case ID_PNG: st->png++; break; case ID_JPG: st->jpg++; break; case ID_GIF: st->gif++; break;
+        case ID_BMP: st->bmp++; break; case ID_MKV: st->mkv++; break; case ID_MP3: st->mp3++; break;
+        case ID_HTML: st->html++; break; case ID_XML: st->xml++; break; case ID_JSON: st->json++; break;
+        case ID_EML: st->eml++; break; default: st->unknown++; break;
+        }
+        return 0;
         };
-
-    hs_scan(db, data, size, 0, scratch, on_match, &best_id);
-
-    switch (best_id) {
-        case ID_DOC: stats.doc++; break;
-        case ID_XLS: stats.xls++; break;
-        case ID_PPT: stats.ppt++; break;
-        case ID_OLE: stats.ole++; break;
-
-        case ID_DOCX: stats.docx++; break;
-        case ID_XLSX: stats.xlsx++; break;
-        case ID_PPTX: stats.pptx++; break;
-        case ID_ZIP: stats.zip++; break;
-
-        case ID_PDF:  stats.pdf++; break;
-        case ID_RAR:  stats.rar++; break;
-        case ID_PNG:  stats.png++; break;
-        case ID_JPG:  stats.jpg++; break;
-        case ID_GIF:  stats.gif++; break;
-        case ID_BMP:  stats.bmp++; break;
-        case ID_MKV:  stats.mkv++; break;
-        case ID_MP3:  stats.mp3++; break;
-        case ID_HTML: stats.html++; break;
-        case ID_XML:  stats.xml++; break;
-        case ID_JSON: stats.json++; break;
-        case ID_EML:  stats.eml++; break;
-        default:      stats.unknown++; break;
-    }
+    hs_scan(db, data, size, 0, scratch, on_match, &stats);
 }
