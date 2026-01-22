@@ -22,28 +22,30 @@ void init_crc32() {
     crc_initialized = true;
 }
 
-// --- Traps & Config ---
+// [FIX] Ловушки теперь "битые" (Corrupted), чтобы не вызывать False Positives
 const std::vector<std::string> TRAPS_BIN = {
-    "\x50\x4B\x00\x00", // Fake PK
-    "\x25\x50\x44\x46", // %PDF header without tail
-    "\x47\x49\x46\x38", // GIF8 header without tail
-    "\xFF\xD8\xFF\x00", // JPG fake
-    "WordDocument"      // OLE marker without OLE header
+    "\x50\x4B\xFF\xFF",     // PK.. (Bad Version) - похоже на ZIP, но не ZIP
+    "\x25\x50\x44\x5F",     // %PD_ (Broken PDF Header)
+    "\x47\x49\x46\x39",     // GIF9 (Not GIF8)
+    "\xFF\xD8\x00\x00",     // JPG Marker prefix without valid subtype
+    "WordDoc_ment",         // [FIX] Broken OLE Marker (was "WordDocument")
+    "Workbuuk",             // Broken Excel
+    "PowerPoint Fakument"   // Broken PPT
 };
 
 const std::vector<std::string> TRAPS_TEXT = {
-    "<html fake='yes'>",
-    "{\"fake_json\": 1}",
-    "Subject: Fake Subject",
-    "%PDF-1.4 (comment)",
-    "PK\x03\x04(fake_zip_in_text)",
-    "GIF89a(fake)"
+    "<hmtl fake='yes'>",    // [FIX] Typo in tag name (hmtl instead of html)
+    "{\"fake_json\"; 1}",   // [FIX] Semicolon instead of colon
+    "Subject- Fake",        // [FIX] Dash instead of colon
+    "%PDF-1.4-fake",        // Broken version
+    "PK\x03\x04_fake_text", // Text looking like binary signature
+    "GIF89a_fake"
 };
 
 DataSetGenerator::DataSetGenerator() {
     init_crc32();
 
-    // Инициализация типов файлов с безопасными хвостами и маркерами
+    // Инициализация типов (без изменений)
     types[".zip"] = { ".zip", Sig::Bin::ZIP_HEAD, "", Sig::Bin::ZIP_TAIL, false };
     types[".rar"] = { ".rar", Sig::Bin::RAR4, "", "", false };
     types[".png"] = { ".png", Sig::Bin::PNG_HEAD, "", Sig::Bin::PNG_TAIL, false };
@@ -66,16 +68,15 @@ DataSetGenerator::DataSetGenerator() {
 
     for (const auto& kv : types) extensions.push_back(kv.first);
 
-    // Словарь для реалистичного текста
+    // Словарь для текста
     dictionary = {
         "lorem", "ipsum", "dolor", "sit", "amet", "consectetur", "adipiscing", "elit",
         "function", "var", "const", "return", "if", "else", "for", "while",
         "class", "public", "private", "protected", "import", "include",
-        "http://example.com", "user@domain.org", "127.0.0.1", "path/to/file"
+        "http://example.com", "user@domain.org", "127.0.0.1", "path/to/file",
+        "debug", "error", "info", "warning", "trace", "fatal"
     };
 }
-
-// --- Logic ---
 
 size_t DataSetGenerator::get_realistic_size(const std::string& ext, std::mt19937& rng) {
     std::uniform_int_distribution<int> chance(0, 100);
@@ -92,7 +93,7 @@ size_t DataSetGenerator::get_realistic_size(const std::string& ext, std::mt19937
         return d(rng);
     }
     else {
-        // Бинарники: распределение по размеру
+        // Бинарники
         if (c < 50) { // 50% мелких (10KB - 500KB)
             std::uniform_int_distribution<size_t> d(10 * 1024, 500 * 1024);
             return d(rng);
@@ -117,15 +118,14 @@ void DataSetGenerator::fill_complex(std::stringstream& ss, size_t count, bool is
         std::uniform_int_distribution<int> trap_chance(0, 100);
 
         while (written < count) {
-            // Редкий шанс вставить текстовую ловушку
             if (trap_chance(rng) < 2 && written + 30 < count) {
+                // Вставка текстовой ловушки
                 std::uniform_int_distribution<size_t> t_idx(0, TRAPS_TEXT.size() - 1);
                 std::string trap = TRAPS_TEXT[t_idx(rng)];
                 ss << trap << " ";
                 written += trap.size() + 1;
             }
             else {
-                // Обычные слова
                 std::string word = dictionary[dict_idx(rng)];
                 if (written + word.size() + 1 <= count) {
                     ss << word << " ";
@@ -141,13 +141,14 @@ void DataSetGenerator::fill_complex(std::stringstream& ss, size_t count, bool is
         std::uniform_int_distribution<int> trap_chance(0, 100);
         while (written < count) {
             if (trap_chance(rng) < 2 && written + 20 < count) {
+                // Вставка бинарной ловушки
                 std::uniform_int_distribution<size_t> t_idx(0, TRAPS_BIN.size() - 1);
                 std::string trap = TRAPS_BIN[t_idx(rng)];
                 ss.write(trap.data(), trap.size());
                 written += trap.size();
             }
             else {
-                ss.put((char)0xCC); // Безопасный мусор
+                ss.put((char)0xCC);
                 written++;
             }
         }
@@ -175,7 +176,6 @@ std::pair<std::string, std::string> DataSetGenerator::create_payload(std::mt1993
         if (total_size < overhead + 100) total_size = overhead + 100;
 
         size_t body = total_size - overhead;
-        // Маркер (middle) ближе к началу для RE2
         size_t pre_marker = std::min((size_t)50, body);
         size_t post_marker = body - pre_marker;
 
@@ -218,66 +218,15 @@ uint32_t DataSetGenerator::calculate_crc32(const std::string& data) {
     return crc ^ 0xFFFFFFFF;
 }
 
-// --- Container Structures ---
 #pragma pack(push, 1)
-struct PcapGlobalHeader {
-    uint32_t magic = 0xa1b2c3d4;
-    uint16_t vm = 2; uint16_t vn = 4; int32_t tz = 0; uint32_t sf = 0; uint32_t sl = 65535; uint32_t net = 1;
-};
-struct PcapPacketHeader {
-    uint32_t ts_sec; uint32_t ts_usec; uint32_t incl; uint32_t orig;
-};
-
-// [FIX] Переименованы поля для соответствия коду (были сокращения csz, usz...)
-struct ZipLocalHeader {
-    uint32_t sig = 0x04034b50;
-    uint16_t ver = 20;
-    uint16_t fl = 0;
-    uint16_t comp = 0;
-    uint16_t tm = 0;
-    uint16_t dt = 0;
-    uint32_t crc32 = 0;       // Исправлено
-    uint32_t comp_size = 0;   // Исправлено
-    uint32_t uncomp_size = 0; // Исправлено
-    uint16_t name_len = 0;    // Исправлено
-    uint16_t extra_len = 0;   // Исправлено
-};
-
-struct ZipDirHeader {
-    uint32_t sig = 0x02014b50;
-    uint16_t ver_made = 20;
-    uint16_t ver_need = 20;
-    uint16_t fl = 0;
-    uint16_t comp = 0;
-    uint16_t tm = 0;
-    uint16_t dt = 0;
-    uint32_t crc32 = 0;        // Исправлено
-    uint32_t comp_size = 0;    // Исправлено
-    uint32_t uncomp_size = 0;  // Исправлено
-    uint16_t name_len = 0;     // Исправлено
-    uint16_t extra_len = 0;    // Исправлено
-    uint16_t comment_len = 0;  // Исправлено
-    uint16_t disk_start = 0;
-    uint16_t int_attr = 0;
-    uint32_t ext_attr = 0;
-    uint32_t local_offset = 0; // Исправлено
-};
-
-struct ZipEOCD {
-    uint32_t sig = 0x06054b50;
-    uint16_t disk_num = 0;
-    uint16_t disk_dir_start = 0;
-    uint16_t num_dir_this = 0;  // Исправлено
-    uint16_t num_dir_total = 0; // Исправлено
-    uint32_t size_dir = 0;      // Исправлено
-    uint32_t offset_dir = 0;    // Исправлено
-    uint16_t comment_len = 0;
-};
+struct PcapGlobalHeader { uint32_t magic = 0xa1b2c3d4; uint16_t vm = 2; uint16_t vn = 4; int32_t tz = 0; uint32_t sf = 0; uint32_t sl = 65535; uint32_t net = 1; };
+struct PcapPacketHeader { uint32_t ts_sec; uint32_t ts_usec; uint32_t incl; uint32_t orig; };
+struct ZipLocalHeader { uint32_t sig = 0x04034b50; uint16_t ver = 20; uint16_t fl = 0; uint16_t comp = 0; uint16_t tm = 0; uint16_t dt = 0; uint32_t crc32 = 0; uint32_t comp_size = 0; uint32_t uncomp_size = 0; uint16_t name_len = 0; uint16_t extra_len = 0; };
+struct ZipDirHeader { uint32_t sig = 0x02014b50; uint16_t ver_made = 20; uint16_t ver_need = 20; uint16_t fl = 0; uint16_t comp = 0; uint16_t tm = 0; uint16_t dt = 0; uint32_t crc32 = 0; uint32_t comp_size = 0; uint32_t uncomp_size = 0; uint16_t name_len = 0; uint16_t extra_len = 0; uint16_t comment_len = 0; uint16_t disk_start = 0; uint16_t int_attr = 0; uint32_t ext_attr = 0; uint32_t local_offset = 0; };
+struct ZipEOCD { uint32_t sig = 0x06054b50; uint16_t disk_num = 0; uint16_t disk_dir_start = 0; uint16_t num_dir_this = 0; uint16_t num_dir_total = 0; uint32_t size_dir = 0; uint32_t offset_dir = 0; uint16_t comment_len = 0; };
 #pragma pack(pop)
 
-// --- Universal Write Method ---
 void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t limit, int limit_type, OutputMode mode, double mix_ratio, GenStats& stats) {
-    // Подготовка
     if (mode == OutputMode::FOLDER) {
         if (std::filesystem::exists(path)) std::filesystem::remove_all(path);
         std::filesystem::create_directories(path);
@@ -304,11 +253,9 @@ void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t l
     size_t current_bytes = 0;
     uint32_t timestamp = (uint32_t)std::time(nullptr);
 
-    // Главный цикл генерации
     while (true) {
-        // Проверка условий выхода
-        if (limit_type == 0 && current_count >= limit) break; // По количеству
-        if (limit_type == 1 && current_bytes >= limit) break; // По размеру
+        if (limit_type == 0 && current_count >= limit) break;
+        if (limit_type == 1 && current_bytes >= limit) break;
 
         bool is_mixed = dist_mix(rng) < mix_ratio;
         auto [ext, data] = create_payload(rng, is_mixed);
@@ -349,14 +296,12 @@ void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t l
         current_count++;
         current_bytes += data.size();
 
-        // Индикация прогресса
         if (current_count % 20 == 0) {
             std::cout << "\rGenerating: " << current_count << " files | "
                 << (current_bytes / 1024 / 1024) << " MB" << std::flush;
         }
     }
 
-    // Завершение ZIP (Central Directory)
     if (mode == OutputMode::ZIP) {
         uint32_t cd_start = (uint32_t)f.tellp();
         for (const auto& e : zip_entries) {
