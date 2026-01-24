@@ -1,23 +1,24 @@
 cmake_minimum_required(VERSION 3.21)
 
 # ==============================================================================
-# 1. НАСТРОЙКА VCPKG И ПОЛИТИК
+# 1. НАСТРОЙКИ VCPKG
 # ==============================================================================
-# Подавляем Warning по поводу FindBoost (CMP0167)
+# Убираем надоедливый варнинг про FindBoost
 if(POLICY CMP0167)
     cmake_policy(SET CMP0167 OLD)
 endif()
 
-set(VCPKG_ROOT "C:/vcpkg" CACHE STRING "Path to vcpkg root directory" FORCE)
-set(VCPKG_DEFAULT_TRIPLET "x64-windows" CACHE STRING "vcpkg triplet" FORCE)
+set(VCPKG_ROOT "C:/vcpkg" CACHE STRING "Путь до vcpkg" FORCE)
+set(VCPKG_DEFAULT_TRIPLET "x64-windows" CACHE STRING "Архитектура по дефолту" FORCE)
 
+# Подключаем тулчейн vcpkg, если он еще не задан
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-        CACHE STRING "Vcpkg toolchain file" FORCE)
+        CACHE STRING "Vcpkg toolchain" FORCE)
 endif()
 
 # ==============================================================================
-# 2. ИНИЦИАЛИЗАЦИЯ ПРОЕКТА
+# 2. ПРОЕКТ
 # ==============================================================================
 project(RegexBench)
 
@@ -28,14 +29,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 3. ПОИСК БИБЛИОТЕК
 # ==============================================================================
 
-# --- Hyperscan (Особый случай) ---
-# ВНИМАНИЕ: При Manifest Mode vcpkg ставит библиотеки в build/vcpkg_installed.
-# Если Hyperscan нет в vcpkg.json, он будет искаться в глобальном каталоге.
+# --- Hyperscan (Тут пришлось повозиться) ---
+# Hyperscan ставится кривовато в vcpkg (нет нормального конфига), ищем вручную.
 find_path(HYPERSCAN_INCLUDE_DIR
     NAMES hs/hs.h
-    # Сначала ищем в локальной папке сборки (если добавлен в манифест)
+    # Сначала смотрим в локальной папке билда (если манифест режим)
     PATHS "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_DEFAULT_TRIPLET}/include"
-    # Потом в глобальной (как запасной вариант)
+    # На всякий случай смотрим в глобальной папке vcpkg
     "${VCPKG_ROOT}/installed/${VCPKG_DEFAULT_TRIPLET}/include"
     NO_DEFAULT_PATH
 )
@@ -48,22 +48,20 @@ find_library(HYPERSCAN_LIBRARY
 )
 
 if(NOT HYPERSCAN_INCLUDE_DIR OR NOT HYPERSCAN_LIBRARY)
-    message(FATAL_ERROR "Hyperscan не найден! Проверьте пути.")
+    message(FATAL_ERROR "Hyperscan не нашелся! Проверь пути в CMakeLists.")
 endif()
 
-# --- Остальные библиотеки (через Config Mode) ---
+# --- Остальное ищется нормально через конфиги ---
 find_package(absl CONFIG REQUIRED)
 find_package(re2 CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS regex)
 find_package(benchmark CONFIG REQUIRED)
-
-# ТЕПЕРЬ GTest ищем через CONFIG (так как он будет в vcpkg.json)
 find_package(GTest CONFIG REQUIRED)
 
 enable_testing()
 
 # ==============================================================================
-# 4. ФАЙЛЫ ПРОЕКТА
+# 4. ФАЙЛЫ
 # ==============================================================================
 
 set(SOURCES
@@ -79,10 +77,10 @@ set(HEADERS
 )
 
 # ==============================================================================
-# 5. СБОРКА И ЛИНКОВКА
+# 5. СБОРКА
 # ==============================================================================
 
-# Основное приложение
+# Основная программа
 add_executable(RegexBench ${SOURCES} ${HEADERS})
 
 target_include_directories(RegexBench PRIVATE
@@ -116,7 +114,6 @@ target_link_libraries(RegexBenchTests PRIVATE
     re2::re2
     Boost::regex
     ${HYPERSCAN_LIBRARY}
-    # В CONFIG режиме цели называются GTest::gtest и GTest::gtest_main
     GTest::gtest
     GTest::gtest_main 
 )

@@ -1,0 +1,16 @@
+# Этот файл является корневым для настроек проекта
+root = true
+
+# Настройки для всех файлов по умолчанию
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Специальные настройки для C++ файлов (.cpp, .h, и т.д.)
+# Включаем BOM, чтобы компилятор MSVC корректно понимал кириллицу
+[*.{cpp,h,hpp,c,cc,cxx}]
+charset = utf-8-bom

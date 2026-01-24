@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <string>
 #include <sstream>
 #include <iomanip>
@@ -29,9 +29,10 @@ namespace Sig {
         const std::string JPG_TAIL = "\xFF\xD9";
         const std::string GIF_HEAD = "\x47\x49\x46\x38";
 
-        // [FIX] ����� �������� ����� 2, ����� ������ ��������� �� \x00 � ������ ������!
+        // [FIX] Тут был баг: строка обрезалась на \x00. Указываем длину 2 явно!
         const std::string GIF_TAIL("\x00\x3B", 2);
 
+        // Используем [\s\S] вместо точки, чтобы ловить переносы строк
         const std::string BMP_HEAD = "\x42\x4D[\\s\\S]{4}\\x00\\x00";
 
         const std::string MKV = "\x1A\x45\xDF\xA3";
@@ -49,6 +50,7 @@ namespace Sig {
         const std::string EML = "From:\\s";
     }
 
+    // Хелпер для перевода байт в hex-строку для regex
     inline std::string raw_to_hex(const std::string& raw) {
         std::ostringstream ss;
         for (unsigned char c : raw) {
@@ -60,9 +62,11 @@ namespace Sig {
     const std::string ANY = "[\\s\\S]";
     const std::string LIMIT_STD = "{0,4194304}";
 
+    // Формируем сложную сигнатуру (Заголовок...Маркер)
     template <Engine E>
     std::string complex(const std::string& head_raw, const std::string& marker_raw) {
         std::string gap;
+        // [FIX] Для RE2 ставим лимит 1000, иначе он кидает ошибку компиляции
         if constexpr (E == Engine::RE2) {
             gap = "{0,1000}";
         }
@@ -71,14 +75,14 @@ namespace Sig {
         }
         return raw_to_hex(head_raw) + ANY + gap + raw_to_hex(marker_raw);
     }
-
+    
     template <Engine E>
     std::string framed(const std::string& head_raw, const std::string& tail_raw) {
         std::string head = raw_to_hex(head_raw);
         std::string tail = raw_to_hex(tail_raw);
 
         if constexpr (E == Engine::HS) return head + ".*?" + tail;
-        else if constexpr (E == Engine::RE2) return head + ANY + "*" + tail;
+        else if constexpr (E == Engine::RE2) return head + ANY + "*" + tail; // RE2 всегда жадный
         else return head + ANY + LIMIT_STD + "?" + tail;
     }
 

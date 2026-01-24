@@ -1,4 +1,4 @@
-#include "generator/Generator.h"
+﻿#include "generator/Generator.h"
 #include "Signatures.h"
 #include <iostream>
 #include <sstream>
@@ -6,7 +6,7 @@
 #include <ctime>
 #include <iomanip>
 
-// --- CRC32 Utils ---
+// --- CRC32 ---
 static uint32_t crc32_table[256];
 static bool crc_initialized = false;
 
@@ -22,30 +22,30 @@ void init_crc32() {
     crc_initialized = true;
 }
 
-// [FIX] ������� ������ "�����" (Corrupted), ����� �� �������� False Positives
+// [FIX] Ловушки теперь "битые" , чтобы не вызывать False Positives
 const std::vector<std::string> TRAPS_BIN = {
-    "\x50\x4B\xFF\xFF",     // PK.. (Bad Version) - ������ �� ZIP, �� �� ZIP
-    "\x25\x50\x44\x5F",     // %PD_ (Broken PDF Header)
-    "\x47\x49\x46\x39",     // GIF9 (Not GIF8)
+    "\x50\x4B\xFF\xFF",     // PK.. - похоже на ZIP, но не ZIP
+    "\x25\x50\x44\x5F",     // %PD_ (невалидный заголвок ПДФ)
+    "\x47\x49\x46\x39",     // GIF9 (а не GIF8)
     "\xFF\xD8\x00\x00",     // JPG Marker prefix without valid subtype
-    "WordDoc_ment",         // [FIX] Broken OLE Marker (was "WordDocument")
-    "Workbuuk",             // Broken Excel
-    "PowerPoint Fakument"   // Broken PPT
+    "WordDoc_ment",         // [FIX] Опепчатка в "WordDocument"
+    "Workbuuk",             // Опечатка в  Excel
+    "PowerPoint Fakument"   // Опечатка PPT
 };
 
 const std::vector<std::string> TRAPS_TEXT = {
-    "<hmtl fake='yes'>",    // [FIX] Typo in tag name (hmtl instead of html)
-    "{\"fake_json\"; 1}",   // [FIX] Semicolon instead of colon
-    "Subject- Fake",        // [FIX] Dash instead of colon
-    "%PDF-1.4-fake",        // Broken version
-    "PK\x03\x04_fake_text", // Text looking like binary signature
-    "GIF89a_fake"
+    "<hmtl fake='yes'>",    // [FIX] Опечатка в теге 
+    "{\"fake_json\"; 1}",   // [FIX] Точка с запятой вместо двоеточия
+    "Subject- Fake",        // [FIX] Тире вместо двоеточия
+    "%PDF-1.4-fake",        // Мусор в вресии
+	"PK\x03\x04_fake_text", // Похожа на ZIP в тексте
+	"GIF89a_fake"           // Похожа на GIF в тексте
 };
 
 DataSetGenerator::DataSetGenerator() {
     init_crc32();
 
-    // ������������� ����� (��� ���������)
+    // Инициализация типов 
     types[".zip"] = { ".zip", Sig::Bin::ZIP_HEAD, "", Sig::Bin::ZIP_TAIL, false };
     types[".rar"] = { ".rar", Sig::Bin::RAR4, "", "", false };
     types[".png"] = { ".png", Sig::Bin::PNG_HEAD, "", Sig::Bin::PNG_TAIL, false };
@@ -68,7 +68,7 @@ DataSetGenerator::DataSetGenerator() {
 
     for (const auto& kv : types) extensions.push_back(kv.first);
 
-    // ������� ��� ������
+    // Словарь для текста
     dictionary = {
         "lorem", "ipsum", "dolor", "sit", "amet", "consectetur", "adipiscing", "elit",
         "function", "var", "const", "return", "if", "else", "for", "while",
@@ -82,27 +82,28 @@ size_t DataSetGenerator::get_realistic_size(const std::string& ext, std::mt19937
     std::uniform_int_distribution<int> chance(0, 100);
     int c = chance(rng);
 
+    // [FIX] Сделал размеры более реалистичными. Видео должно быть большим.
     if (types[ext].is_text) {
-        // �����: 1 �� - 200 ��
+        // Текст: 1 КБ - 200 КБ
         std::uniform_int_distribution<size_t> d(1024, 200 * 1024);
         return d(rng);
     }
     else if (ext == ".mkv" || ext == ".mp3") {
-        // �����: 5 �� - 50 ��
+        // Медиа: 5 МБ - 50 МБ
         std::uniform_int_distribution<size_t> d(5 * 1024 * 1024, 50 * 1024 * 1024);
         return d(rng);
     }
     else {
-        // ���������
-        if (c < 50) { // 50% ������ (10KB - 500KB)
+        // Бинарники
+        if (c < 50) { // 50% мелких (10KB - 500KB)
             std::uniform_int_distribution<size_t> d(10 * 1024, 500 * 1024);
             return d(rng);
         }
-        else if (c < 90) { // 40% ������� (500KB - 5MB)
+        else if (c < 90) { // 40% средних (500KB - 5MB)
             std::uniform_int_distribution<size_t> d(500 * 1024, 5 * 1024 * 1024);
             return d(rng);
         }
-        else { // 10% ������� (5MB - 20MB)
+        else { // 10% крупных (5MB - 20MB)
             std::uniform_int_distribution<size_t> d(5 * 1024 * 1024, 20 * 1024 * 1024);
             return d(rng);
         }
@@ -119,7 +120,7 @@ void DataSetGenerator::fill_complex(std::stringstream& ss, size_t count, bool is
 
         while (written < count) {
             if (trap_chance(rng) < 2 && written + 30 < count) {
-                // ������� ��������� �������
+                // Вставка текстовой ловушки
                 std::uniform_int_distribution<size_t> t_idx(0, TRAPS_TEXT.size() - 1);
                 std::string trap = TRAPS_TEXT[t_idx(rng)];
                 ss << trap << " ";
@@ -141,13 +142,14 @@ void DataSetGenerator::fill_complex(std::stringstream& ss, size_t count, bool is
         std::uniform_int_distribution<int> trap_chance(0, 100);
         while (written < count) {
             if (trap_chance(rng) < 2 && written + 20 < count) {
-                // ������� �������� �������
+                // Вставка бинарной ловушки
                 std::uniform_int_distribution<size_t> t_idx(0, TRAPS_BIN.size() - 1);
                 std::string trap = TRAPS_BIN[t_idx(rng)];
                 ss.write(trap.data(), trap.size());
                 written += trap.size();
             }
             else {
+                // [FIX] Используем 0xCC, чтобы случайно не сгенерить сигнатуру хвоста
                 ss.put((char)0xCC);
                 written++;
             }
@@ -218,13 +220,70 @@ uint32_t DataSetGenerator::calculate_crc32(const std::string& data) {
     return crc ^ 0xFFFFFFFF;
 }
 
-#pragma pack(push, 1)
-struct PcapGlobalHeader { uint32_t magic = 0xa1b2c3d4; uint16_t vm = 2; uint16_t vn = 4; int32_t tz = 0; uint32_t sf = 0; uint32_t sl = 65535; uint32_t net = 1; };
-struct PcapPacketHeader { uint32_t ts_sec; uint32_t ts_usec; uint32_t incl; uint32_t orig; };
-struct ZipLocalHeader { uint32_t sig = 0x04034b50; uint16_t ver = 20; uint16_t fl = 0; uint16_t comp = 0; uint16_t tm = 0; uint16_t dt = 0; uint32_t crc32 = 0; uint32_t comp_size = 0; uint32_t uncomp_size = 0; uint16_t name_len = 0; uint16_t extra_len = 0; };
-struct ZipDirHeader { uint32_t sig = 0x02014b50; uint16_t ver_made = 20; uint16_t ver_need = 20; uint16_t fl = 0; uint16_t comp = 0; uint16_t tm = 0; uint16_t dt = 0; uint32_t crc32 = 0; uint32_t comp_size = 0; uint32_t uncomp_size = 0; uint16_t name_len = 0; uint16_t extra_len = 0; uint16_t comment_len = 0; uint16_t disk_start = 0; uint16_t int_attr = 0; uint32_t ext_attr = 0; uint32_t local_offset = 0; };
-struct ZipEOCD { uint32_t sig = 0x06054b50; uint16_t disk_num = 0; uint16_t disk_dir_start = 0; uint16_t num_dir_this = 0; uint16_t num_dir_total = 0; uint32_t size_dir = 0; uint32_t offset_dir = 0; uint16_t comment_len = 0; };
-#pragma pack(pop)
+#pragma pack(push, 1) // Выравнивание структур
+
+struct PcapGlobalHeader { 
+    uint32_t magic = 0xa1b2c3d4; 
+    uint16_t vm = 2; 
+    uint16_t vn = 4; 
+    int32_t tz = 0; 
+    uint32_t sf = 0; 
+    uint32_t sl = 65535; 
+    uint32_t net = 1; 
+};
+
+struct PcapPacketHeader { 
+    uint32_t ts_sec; 
+    uint32_t ts_usec; 
+    uint32_t incl; 
+    uint32_t orig; 
+};
+// [FIX] Привел имена полей в соответствие с кодом(были сокращения)
+struct ZipLocalHeader { 
+    uint32_t sig = 0x04034b50; 
+    uint16_t ver = 20; 
+    uint16_t fl = 0; 
+    uint16_t comp = 0; 
+    uint16_t tm = 0; 
+    uint16_t dt = 0; 
+    uint32_t crc32 = 0; 
+    uint32_t comp_size = 0;
+    uint32_t uncomp_size = 0; 
+    uint16_t name_len = 0; 
+    uint16_t extra_len = 0; 
+};
+
+struct ZipDirHeader { 
+    uint32_t sig = 0x02014b50; 
+    uint16_t ver_made = 20; 
+    uint16_t ver_need = 20; 
+    uint16_t fl = 0; 
+    uint16_t comp = 0; 
+    uint16_t tm = 0; 
+    uint16_t dt = 0; 
+    uint32_t crc32 = 0; 
+    uint32_t comp_size = 0; 
+    uint32_t uncomp_size = 0; 
+    uint16_t name_len = 0; 
+    uint16_t extra_len = 0; 
+    uint16_t comment_len = 0; 
+    uint16_t disk_start = 0; 
+    uint16_t int_attr = 0; 
+    uint32_t ext_attr = 0; 
+    uint32_t local_offset = 0; 
+};
+
+struct ZipEOCD { 
+    uint32_t sig = 0x06054b50; 
+    uint16_t disk_num = 0; 
+    uint16_t disk_dir_start = 0; 
+    uint16_t num_dir_this = 0; 
+    uint16_t num_dir_total = 0; 
+    uint32_t size_dir = 0; 
+    uint32_t offset_dir = 0; 
+    uint16_t comment_len = 0; 
+};
+#pragma pack(pop) // Выравнивание структур
 
 void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t limit, int limit_type, OutputMode mode, double mix_ratio, GenStats& stats) {
     if (mode == OutputMode::FOLDER) {
@@ -254,8 +313,8 @@ void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t l
     uint32_t timestamp = (uint32_t)std::time(nullptr);
 
     while (true) {
-        if (limit_type == 0 && current_count >= limit) break;
-        if (limit_type == 1 && current_bytes >= limit) break;
+		if (limit_type == 0 && current_count >= limit) break; // лимит по файлам
+		if (limit_type == 1 && current_bytes >= limit) break; // лимит по байтам
 
         bool is_mixed = dist_mix(rng) < mix_ratio;
         auto [ext, data] = create_payload(rng, is_mixed);
@@ -296,6 +355,7 @@ void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t l
         current_count++;
         current_bytes += data.size();
 
+		// Прогресс бар
         if (current_count % 20 == 0) {
             std::cout << "\rGenerating: " << current_count << " files | "
                 << (current_bytes / 1024 / 1024) << " MB" << std::flush;

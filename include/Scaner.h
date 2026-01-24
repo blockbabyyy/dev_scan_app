@@ -1,39 +1,39 @@
-#pragma once
+п»ї#pragma once
 #include <string>
 #include <vector>
 #include <memory>
 #include <regex>
 #include <iostream>
 
-// Подключаем Boost (нужен для определения членов класса BoostScanner)
+// РџРѕРґРєР»СЋС‡Р°РµРј Boost (РЅСѓР¶РµРЅ РґР»СЏ РѕРїСЂРµРґРµР»РµРЅРёСЏ С‡Р»РµРЅРѕРІ РєР»Р°СЃСЃР° BoostScanner)
 #include <boost/regex.hpp>
 
-// Forward declarations для сторонних библиотек, чтобы не тянуть их хедеры сюда,
-// если не обязательно (хотя для unique_ptr RE2 нужен полный тип в cpp, здесь достаточно forward decl,
-// но проще подключить в cpp, а здесь использовать указатели).
+// Forward declarations РґР»СЏ СЃС‚РѕСЂРѕРЅРЅРёС… Р±РёР±Р»РёРѕС‚РµРє, С‡С‚РѕР±С‹ РЅРµ С‚СЏРЅСѓС‚СЊ РёС… С…РµРґРµСЂС‹ СЃСЋРґР°,
+// РµСЃР»Рё РЅРµ РѕР±СЏР·Р°С‚РµР»СЊРЅРѕ (С…РѕС‚СЏ РґР»СЏ unique_ptr RE2 РЅСѓР¶РµРЅ РїРѕР»РЅС‹Р№ С‚РёРї РІ cpp, Р·РґРµСЃСЊ РґРѕСЃС‚Р°С‚РѕС‡РЅРѕ forward decl,
+// РЅРѕ РїСЂРѕС‰Рµ РїРѕРґРєР»СЋС‡РёС‚СЊ РІ cpp, Р° Р·РґРµСЃСЊ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ СѓРєР°Р·Р°С‚РµР»Рё).
 namespace re2 { class RE2; }
 struct hs_database;
 struct hs_scratch;
 
 // ==========================================
-// Структура статистики
+// РЎС‚СЂСѓРєС‚СѓСЂР° СЃС‚Р°С‚РёСЃС‚РёРєРё
 // ==========================================
 struct ScanStats {
-    // Общие счетчики
+    // РћР±С‰РёРµ СЃС‡РµС‚С‡РёРєРё
     int total_files = 0;
 
-    // Архивы
+    // РђСЂС…РёРІС‹
     int pdf = 0;
     int zip = 0;
     int rar = 0;
 
-    // Картинки
+    // РљР°СЂС‚РёРЅРєРё
     int png = 0;
     int jpg = 0;
     int gif = 0;
     int bmp = 0;
 
-    // Медиа
+    // РњРµРґРёР°
     int mkv = 0;
     int mp3 = 0;
 
@@ -47,48 +47,48 @@ struct ScanStats {
     int xlsx = 0;
     int pptx = 0;
 
-    // Текст
+    // РўРµРєСЃС‚
     int html = 0;
     int xml = 0;
     int json = 0;
     int eml = 0;
 
-    // Служебные
-    int ole = 0;     // Просто контейнер OLE (без уточнения типа)
-    int unknown = 0; // Не распознано
+    // РЎР»СѓР¶РµР±РЅС‹Рµ
+    int ole = 0;     // РџСЂРѕСЃС‚Рѕ РєРѕРЅС‚РµР№РЅРµСЂ OLE (Р±РµР· СѓС‚РѕС‡РЅРµРЅРёСЏ С‚РёРїР°)
+    int unknown = 0; // РќРµ СЂР°СЃРїРѕР·РЅР°РЅРѕ
 
-    // Метод для суммирования результатов (нужен для многопоточности или агрегации)
+    // РњРµС‚РѕРґ РґР»СЏ СЃСѓРјРјРёСЂРѕРІР°РЅРёСЏ СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ (РЅСѓР¶РµРЅ РґР»СЏ РјРЅРѕРіРѕРїРѕС‚РѕС‡РЅРѕСЃС‚Рё РёР»Рё Р°РіСЂРµРіР°С†РёРё)
     ScanStats& operator+=(const ScanStats& other);
 
-    // Метод для красивого вывода
+    // РњРµС‚РѕРґ РґР»СЏ РєСЂР°СЃРёРІРѕРіРѕ РІС‹РІРѕРґР°
     void print(const std::string& name) const;
 
-    // Сброс
+    // РЎР±СЂРѕСЃ
     void reset() { *this = ScanStats(); }
 };
 
-// GenStats — это то же самое, что ScanStats (статистика генератора)
+// GenStats вЂ” СЌС‚Рѕ С‚Рѕ Р¶Рµ СЃР°РјРѕРµ, С‡С‚Рѕ ScanStats (СЃС‚Р°С‚РёСЃС‚РёРєР° РіРµРЅРµСЂР°С‚РѕСЂР°)
 using GenStats = ScanStats;
 
 // ==========================================
-// Базовый интерфейс Сканера
+// Р‘Р°Р·РѕРІС‹Р№ РёРЅС‚РµСЂС„РµР№СЃ РЎРєР°РЅРµСЂР°
 // ==========================================
 class Scanner {
 public:
     virtual ~Scanner() = default;
 
-    // Подготовка (нужна для Hyperscan для аллокации scratch memory)
+    // РџРѕРґРіРѕС‚РѕРІРєР° (РЅСѓР¶РЅР° РґР»СЏ Hyperscan РґР»СЏ Р°Р»Р»РѕРєР°С†РёРё scratch memory)
     virtual void prepare() {}
 
-    // Основной метод сканирования
+    // РћСЃРЅРѕРІРЅРѕР№ РјРµС‚РѕРґ СЃРєР°РЅРёСЂРѕРІР°РЅРёСЏ
     virtual void scan(const char* data, size_t size, ScanStats& stats) = 0;
 
-    // Имя движка
+    // РРјСЏ РґРІРёР¶РєР°
     virtual std::string name() const = 0;
 };
 
 // ==========================================
-// Реализации сканеров
+// Р РµР°Р»РёР·Р°С†РёРё СЃРєР°РЅРµСЂРѕРІ
 // ==========================================
 
 // 1. std::regex
@@ -116,7 +116,7 @@ public:
     void scan(const char* data, size_t size, ScanStats& stats) override;
 
 private:
-    // Используем unique_ptr, чтобы не инклюдить re2.h в хедер
+    // РСЃРїРѕР»СЊР·СѓРµРј unique_ptr, С‡С‚РѕР±С‹ РЅРµ РёРЅРєР»СЋРґРёС‚СЊ re2.h РІ С…РµРґРµСЂ
     std::unique_ptr<re2::RE2> r_pdf, r_zip_gen;
     std::unique_ptr<re2::RE2> r_rar4, r_rar5;
     std::unique_ptr<re2::RE2> r_png, r_jpg, r_gif, r_bmp;
@@ -157,7 +157,7 @@ private:
     struct hs_database* db = nullptr;
     struct hs_scratch* scratch = nullptr;
 
-    // ID для Hyperscan (enum для switch-case в callback)
+    // ID РґР»СЏ Hyperscan (enum РґР»СЏ switch-case РІ callback)
     enum {
         ID_DOC = 1, ID_XLS, ID_PPT,
         ID_DOCX, ID_XLSX, ID_PPTX,

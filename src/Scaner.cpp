@@ -1,4 +1,4 @@
-#include <re2/re2.h>
+п»ї#include <re2/re2.h>
 #include <hs/hs.h>
 #include <string_view>
 #include <iostream>
@@ -8,16 +8,32 @@
 #include "Scaner.h"
 #include "Signatures.h" 
 
-// ... (ScanStats и Helpers без изменений) ...
+// РҐРµР»РїРµСЂС‹ РґР»СЏ ScanStats
 ScanStats& ScanStats::operator+=(const ScanStats& other) {
-    pdf += other.pdf; doc += other.doc; xls += other.xls; ppt += other.ppt; ole += other.ole;
-    docx += other.docx; xlsx += other.xlsx; pptx += other.pptx; zip += other.zip;
-    rar += other.rar; png += other.png; jpg += other.jpg; gif += other.gif; bmp += other.bmp;
-    mkv += other.mkv; mp3 += other.mp3;
-    html += other.html; xml += other.xml; json += other.json; eml += other.eml;
+    pdf += other.pdf; 
+    doc += other.doc; 
+    xls += other.xls; 
+    ppt += other.ppt; 
+    ole += other.ole;
+    docx += other.docx; 
+    xlsx += other.xlsx; 
+    pptx += other.pptx; 
+    zip += other.zip;
+    rar += other.rar; 
+    png += other.png; 
+    jpg += other.jpg; 
+    gif += other.gif; 
+    bmp += other.bmp;
+    mkv += other.mkv; 
+    mp3 += other.mp3;
+    html += other.html; 
+    xml += other.xml; 
+    json += other.json; 
+    eml += other.eml;
     unknown += other.unknown;
     return *this;
 }
+
 void ScanStats::print(const std::string& name) const {
     std::cout << "===== " << name << " Results =====" << std::endl;
     std::cout << "PDF: " << pdf << " | ZIP: " << zip << " | RAR: " << rar << "\n";
@@ -26,16 +42,19 @@ void ScanStats::print(const std::string& name) const {
     std::cout << "Text: HTML=" << html << " XML=" << xml << " JSON=" << json << " EML=" << eml << "\n";
     std::cout << "========================================" << std::endl;
 }
+
 void compare_stats(const GenStats& gen, const ScanStats& scan, const std::string& name) {
     std::cout << "\n>>> Check: " << name << " <<<\n";
     std::cout << "Total Gen: " << gen.total_files << "\n";
 }
+
 inline bool has_sig(const char* data, size_t size, const std::string& signature) {
     if (signature.empty()) return true;
     std::string_view sv(data, size);
     return sv.find(signature) != std::string_view::npos;
 }
 
+// РҐРµР»РїРµСЂС‹ РґР»СЏ РїРѕРґСЃС‡РµС‚Р° РєРѕР»РёС‡РµСЃС‚РІР° СЃРѕРІРїР°РґРµРЅРёР№
 template<typename SearchFunc>
 int count_matches_std(const char* data, size_t size, const std::regex& re, SearchFunc searcher) {
     int count = 0;
@@ -53,6 +72,7 @@ int count_matches_std(const char* data, size_t size, const std::regex& re, Searc
     catch (...) {}
     return count;
 }
+
 template<typename SearchFunc>
 int count_matches_boost(const char* data, size_t size, const boost::regex& re, SearchFunc searcher) {
     int count = 0;
@@ -70,6 +90,7 @@ int count_matches_boost(const char* data, size_t size, const boost::regex& re, S
     catch (...) {}
     return count;
 }
+
 int count_re2(const char* data, size_t size, re2::RE2* re) {
     if (!re || !re->ok()) return 0;
     int count = 0;
@@ -78,6 +99,9 @@ int count_re2(const char* data, size_t size, re2::RE2* re) {
     return count;
 }
 
+// Р‘С‹СЃС‚СЂР°СЏ РїСЂРµРґРІР°СЂРёС‚РµР»СЊРЅР°СЏ РїСЂРѕРІРµСЂРєР° РЅР°Р»РёС‡РёСЏ СЃРёРіРЅР°С‚СѓСЂ
+// [FIX] Р•СЃР»Рё Р·Р°РіРѕР»РѕРІРєР° РЅРµС‚, РёР»Рё С…РІРѕСЃС‚Р° РЅРµС‚ - РІС‹С…РѕРґРёРј СЃСЂР°Р·Сѓ, РЅРµ РґРµСЂРіР°РµРј regex 
+// ( РџРѕРєР° РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ, РЅРѕ Р±РµР· РЅРµРіРѕ Р±РµСЃРєРѕРЅРµС‡РЅРѕ Р¶РґР°С‚СЊ std Рё Boost)
 inline bool pre_check(const char* data, size_t size, const std::string& head, const std::string& tail = "") {
     if (head.empty()) return true;
     std::string_view sv(data, size);
@@ -100,7 +124,7 @@ StdScanner::StdScanner() {
         catch (const std::regex_error& e) { std::cerr << "[StdScanner] Error compiling " << name << ": " << e.what() << "\n"; }
         };
 
-    // [FIX] Используем Engine::STD
+    // [FIX] РСЃРїРѕР»СЊР·СѓРµРј Engine::STD
     safe_compile(r_doc, Sig::complex<Sig::Engine::STD>(Sig::Bin::OLE, Sig::Bin::OLE_WORD), f, "DOC");
     safe_compile(r_xls, Sig::complex<Sig::Engine::STD>(Sig::Bin::OLE, Sig::Bin::OLE_XL), f, "XLS");
     safe_compile(r_ppt, Sig::complex<Sig::Engine::STD>(Sig::Bin::OLE, Sig::Bin::OLE_PPT), f, "PPT");
@@ -126,31 +150,32 @@ StdScanner::StdScanner() {
     safe_compile(r_xml, Sig::Text::XML, fi, "XML");
     safe_compile(r_eml, Sig::Text::EML, fi, "EML");
 }
+
 std::string StdScanner::name() const { return "std::regex"; }
 void StdScanner::scan(const char* d, size_t s, ScanStats& st) {
-    // Лямбда для поиска с выводом статуса
+    // Р›СЏРјР±РґР° РґР»СЏ РїРѕРёСЃРєР° СЃ РІС‹РІРѕРґРѕРј СЃС‚Р°С‚СѓСЃР°
     auto run_check = [&](const std::string& label, const std::regex& re, int& counter, const std::string& sig_check = "") {
-        // 1. Быстрая проверка сигнатуры (Pre-filter)
+        //Р‘С‹СЃС‚СЂР°СЏ РїСЂРѕРІРµСЂРєР° СЃРёРіРЅР°С‚СѓСЂС‹ (Pre-filter)
         if (!sig_check.empty() && !has_sig(d, s, sig_check)) {
-            return; // Пропускаем, если нет сигнатуры
+            return; // РџСЂРѕРїСѓСЃРєР°РµРј, РµСЃР»Рё РЅРµС‚ СЃРёРіРЅР°С‚СѓСЂС‹
         }
 
-        // 2. Вывод статуса (перезаписываемая строка)
+        // Р’С‹РІРѕРґ СЃС‚Р°С‚СѓСЃР° (РїРµСЂРµР·Р°РїРёСЃС‹РІР°РµРјР°СЏ СЃС‚СЂРѕРєР°, С‡С‚РѕР±С‹ РїСЂРІРѕРµСЂРёС‚СЊ РЅРµ РїРѕРґРІРёСЃ Р»Рё)
         std::cout << "\r[StdScanner] Scanning: " << std::left << std::setw(10) << label
             << " | Found so far: " << counter << std::flush;
 
-        // 3. Поиск регуляркой
+        // РџРѕРёСЃРє СЂРµРіСѓР»СЏСЂРєРѕР№
         const char* start = d;
         const char* end = d + s;
         std::cmatch m;
 
         try {
-            // Проверка на пустую/битую регулярку
+            // РџСЂРѕРІРµСЂРєР° РЅР° РїСѓСЃС‚СѓСЋ/Р±РёС‚СѓСЋ СЂРµРіСѓР»СЏСЂРєСѓ
             if (re.mark_count() == 0 && std::string(start, std::min((size_t)1, s)).empty()) return;
 
             while (start < end && std::regex_search(start, end, m, re)) {
                 counter++;
-                // Обновляем счетчик в реальном времени
+                // РћР±РЅРѕРІР»СЏРµРј СЃС‡РµС‚С‡РёРє РІ СЂРµР°Р»СЊРЅРѕРј РІСЂРµРјРµРЅРё
                 std::cout << "\r[StdScanner] Scanning: " << std::left << std::setw(10) << label
                     << " | Found so far: " << counter << std::flush;
 
@@ -163,15 +188,15 @@ void StdScanner::scan(const char* d, size_t s, ScanStats& st) {
         }
         };
 
-    // --- ЗАПУСК ПРОВЕРОК ---
+    // --- Р—РђРџРЈРЎРљ РџР РћР’Р•Р РћРљ ---
 
-    // OLE Группа
+    // OLE Р“СЂСѓРїРїР°
     run_check("DOC (OLE)", r_doc, st.doc, Sig::Bin::OLE);
     run_check("XLS (OLE)", r_xls, st.xls, Sig::Bin::OLE);
     run_check("PPT (OLE)", r_ppt, st.ppt, Sig::Bin::OLE);
 
-    // ZIP / Office XML Группа
-    // Сначала ищем просто ZIP хедер, если есть - копаем глубже
+    // ZIP / Office XML Р“СЂСѓРїРїР°
+    // РЎРЅР°С‡Р°Р»Р° РёС‰РµРј РїСЂРѕСЃС‚Рѕ ZIP С…РµРґРµСЂ, РµСЃР»Рё РµСЃС‚СЊ - РєРѕРїР°РµРј РіР»СѓР±Р¶Рµ
     if (has_sig(d, s, Sig::Bin::ZIP_HEAD)) {
         run_check("DOCX", r_docx, st.docx);
         run_check("XLSX", r_xlsx, st.xlsx);
@@ -187,18 +212,18 @@ void StdScanner::scan(const char* d, size_t s, ScanStats& st) {
     run_check("JPG", r_jpg, st.jpg, Sig::Bin::JPG_HEAD);
     run_check("GIF", r_gif, st.gif, Sig::Bin::GIF_HEAD);
 
-    run_check("BMP", r_bmp, st.bmp, Sig::Bin::BMP_HEAD.substr(0, 2)); // Проверяем только "BM"
+    run_check("BMP", r_bmp, st.bmp, Sig::Bin::BMP_HEAD.substr(0, 2)); // РџСЂРѕРІРµСЂСЏРµРј С‚РѕР»СЊРєРѕ "BM"
 
     run_check("MKV", r_mkv, st.mkv, Sig::Bin::MKV);
     run_check("MP3", r_mp3, st.mp3, Sig::Bin::MP3);
 
-    // Текстовые файлы (самые опасные для зависания из-за обилия текста)
+    // РўРµРєСЃС‚РѕРІС‹Рµ С„Р°Р№Р»С‹ (СЃР°РјС‹Рµ РѕРїР°СЃРЅС‹Рµ РґР»СЏ Р·Р°РІРёСЃР°РЅРёСЏ РёР·-Р·Р° РѕР±РёР»РёСЏ С‚РµРєСЃС‚Р°)
     run_check("HTML", r_html, st.html, "<html");
     run_check("XML", r_xml, st.xml, "<?xml");
     run_check("JSON", r_json, st.json, "{");
     run_check("EML", r_eml, st.eml, "From:");
 
-    // Очистка строки статуса после завершения
+    // РћС‡РёСЃС‚РєР° СЃС‚СЂРѕРєРё СЃС‚Р°С‚СѓСЃР° РїРѕСЃР»Рµ Р·Р°РІРµСЂС€РµРЅРёСЏ
     std::cout << "\r[StdScanner] Done.                                           \n";
 }
 
@@ -222,7 +247,7 @@ Re2Scanner::Re2Scanner() {
         return re;
         };
 
-    // [FIX] Используем Engine::RE2 (лимит 1000)
+    // [FIX] РСЃРїРѕР»СЊР·СѓРµРј Engine::RE2 (Р»РёРјРёС‚ 1000)
     r_doc = compile(Sig::complex<Sig::Engine::RE2>(Sig::Bin::OLE, Sig::Bin::OLE_WORD), ob, "DOC");
     r_xls = compile(Sig::complex<Sig::Engine::RE2>(Sig::Bin::OLE, Sig::Bin::OLE_XL), ob, "XLS");
     r_ppt = compile(Sig::complex<Sig::Engine::RE2>(Sig::Bin::OLE, Sig::Bin::OLE_PPT), ob, "PPT");
@@ -290,7 +315,7 @@ BoostScanner::BoostScanner() {
         catch (const boost::regex_error& e) { std::cerr << "[BoostScanner] Error compiling " << name << ": " << e.what() << "\n"; }
         };
 
-    // [FIX] Используем Engine::BOOST
+    // [FIX] РСЃРїРѕР»СЊР·СѓРµРј Engine::BOOST
     safe_compile(r_doc, Sig::complex<Sig::Engine::BOOST>(Sig::Bin::OLE, Sig::Bin::OLE_WORD), flags_bin, "DOC");
     safe_compile(r_xls, Sig::complex<Sig::Engine::BOOST>(Sig::Bin::OLE, Sig::Bin::OLE_XL), flags_bin, "XLS");
     safe_compile(r_ppt, Sig::complex<Sig::Engine::BOOST>(Sig::Bin::OLE, Sig::Bin::OLE_PPT), flags_bin, "PPT");
@@ -349,7 +374,7 @@ void BoostScanner::scan(const char* d, size_t s, ScanStats& st) {
 // HsScanner
 // ==========================================
 HsScanner::HsScanner() {
-    // Сигнатуры
+    // РЎРёРіРЅР°С‚СѓСЂС‹
     std::string p_doc = Sig::complex<Sig::Engine::HS>(Sig::Bin::OLE, Sig::Bin::OLE_WORD);
     std::string p_xls = Sig::complex<Sig::Engine::HS>(Sig::Bin::OLE, Sig::Bin::OLE_XL);
     std::string p_ppt = Sig::complex<Sig::Engine::HS>(Sig::Bin::OLE, Sig::Bin::OLE_PPT);
@@ -390,7 +415,7 @@ HsScanner::HsScanner() {
     };
 
     std::vector<unsigned int> flags;
-    // Используем DOTALL для бинарных данных
+    // РСЃРїРѕР»СЊР·СѓРµРј DOTALL РґР»СЏ Р±РёРЅР°СЂРЅС‹С… РґР°РЅРЅС‹С…
     for (int i = 0; i < 16; ++i) flags.push_back(HS_FLAG_DOTALL);
     flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8); // HTML
     flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8); // XML
@@ -415,10 +440,10 @@ void HsScanner::prepare() {
 
 std::string HsScanner::name() const { return "Hyperscan"; }
 
-// Контекст для хранения состояния между вызовами (защита от дребезга)
+// РљРѕРЅС‚РµРєСЃС‚ РґР»СЏ callback-Р° Hyperscan
 struct HsContext {
     ScanStats* stats;
-    unsigned long long last_offset[32] = { 0 }; // Смещение последнего совпадения для каждого id
+    unsigned long long last_offset[32] = { 0 }; // РЎРјРµС‰РµРЅРёРµ РїРѕСЃР»РµРґРЅРµРіРѕ СЃРѕРІРїР°РґРµРЅРёСЏ РґР»СЏ РєР°Р¶РґРѕРіРѕ id
 };
 
 void HsScanner::scan(const char* data, size_t size, ScanStats& stats) {
@@ -431,21 +456,18 @@ void HsScanner::scan(const char* data, size_t size, ScanStats& stats) {
     auto on_match = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* ptr) -> int {
         HsContext* c = static_cast<HsContext*>(ptr);
 
-        // DEBOUNCE LOGIC (Защита от дребезга)
-        // Если для этого ID новое совпадение найдено слишком близко к предыдущему (например, < 512 байт),
-        // считаем это частью того же файла и игнорируем.
-        // Это позволяет считать поток файлов (BIN/ZIP), но подавляет множественные срабатывания внутри одного файла.
-
-        // 0 - особый случай (начало), но to всегда > 0.
-        // Используем 512 байт как "мертвую зону". В генераторе файлы > 1KB.
+        // [FIX] Р—Р°С‰РёС‚Р° РѕС‚ РґСЂРµР±РµР·РіР° (Debounce)
+        // Hyperscan РЅР°С…РѕРґРёС‚ РєР°Р¶РґРѕРµ РІС…РѕР¶РґРµРЅРёРµ. Р•СЃР»Рё С„Р°Р№Р» СЂР°Р·Р±РёС‚ РЅР° С‡Р°РЅРєРё РёР»Рё РІ РЅРµРј РјРЅРѕРіРѕ РїРѕРІС‚РѕСЂРѕРІ,
+        // РјС‹ РјРѕР¶РµРј Р·Р°СЃС‡РёС‚Р°С‚СЊ РµРіРѕ 100 СЂР°Р·.
+        // Р•СЃР»Рё РЅРѕРІРѕРµ СЃРѕРІРїР°РґРµРЅРёРµ СЃР»РёС€РєРѕРј Р±Р»РёР·РєРѕ Рє СЃС‚Р°СЂРѕРјСѓ (< 512 Р±Р°Р№С‚) - РёРіРЅРѕСЂРёРј.
         if (id < 32) {
             unsigned long long last = c->last_offset[id];
 
-            // Если это не первое совпадение И дистанция меньше порога -> пропускаем
+            // Р•СЃР»Рё СЌС‚Рѕ РЅРµ РїРµСЂРІРѕРµ СЃРѕРІРїР°РґРµРЅРёРµ Р РґРёСЃС‚Р°РЅС†РёСЏ РјРµРЅСЊС€Рµ РїРѕСЂРѕРіР° -> РїСЂРѕРїСѓСЃРєР°РµРј
             if (last != 0 && to < last + 512) {
-                return 0;
+                return 0; 
             }
-            c->last_offset[id] = to; // Обновляем позицию
+            c->last_offset[id] = to; // РћР±РЅРѕРІР»СЏРµРј РїРѕР·РёС†РёСЋ
         }
 
         ScanStats* st = c->stats;

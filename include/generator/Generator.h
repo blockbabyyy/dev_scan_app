@@ -1,4 +1,4 @@
-#pragma once
+п»ї#pragma once
 #include <string>
 #include <vector>
 #include <map>
@@ -7,14 +7,14 @@
 #include <random> 
 #include "Scaner.h"
 
-// Используем ScanStats как GenStats для единообразия
+// РСЃРїРѕР»СЊР·СѓРµРј С‚Сѓ Р¶Рµ СЃС‚СЂСѓРєС‚СѓСЂСѓ СЃС‚Р°С‚РёСЃС‚РёРєРё, С‡С‚Рѕ Рё СЃРєР°РЅРµСЂ, С‡С‚РѕР±С‹ РЅРµ РїР»РѕРґРёС‚СЊ СЃСѓС‰РЅРѕСЃС‚Рё
 using GenStats = ScanStats;
 
 enum class OutputMode {
-    FOLDER, // Папка с файлами
-    BIN,    // Бинарная склейка (Blob)
-    PCAP,   // Дамп трафика (файлы как payload пакетов)
-    ZIP     // ZIP-архив без сжатия (Store)
+    FOLDER, // РџР°РїРєР° СЃ С„Р°Р№Р»Р°РјРё
+    BIN,    // Р‘РёРЅР°СЂРЅР°СЏ СЃРєР»РµР№РєР° 
+    PCAP,   // Р­РјСѓР»СЏС†РёСЏ РґР°РјРїР° С‚СЂР°С„РёРєР° (С„Р°Р№Р»С‹ РєР°Рє payload РїР°РєРµС‚РѕРІ)
+    ZIP     // ZIP-Р°СЂС…РёРІ Р±РµР· СЃР¶Р°С‚РёСЏ (Store)
 };
 
 class DataSetGenerator {
@@ -29,27 +29,27 @@ public:
 
     DataSetGenerator();
 
-    // Генерация заданного количества файлов
+    // Р“РµРЅРµСЂРёРј РїРѕ РєРѕР»-РІСѓ Р·Р°РґР°РЅРЅРѕРіРѕ РєРѕР»РёС‡РµСЃС‚РІР° С„Р°Р№Р»РѕРІ
     GenStats generate_count(const std::filesystem::path& output_path, int count, OutputMode mode, double mix_ratio = 0.0);
 
-    // Генерация заданного объема данных (в МБ)
+    // Р“РµРЅРµСЂРёРј РїРѕ Р·Р°РґР°РЅРЅРѕРјСѓ РѕР±СЉРµРјСѓ РґР°РЅРЅС‹С… (РІ РњР‘)
     GenStats generate_size(const std::filesystem::path& output_path, int size_mb, OutputMode mode, double mix_ratio = 0.0);
 
 private:
     std::map<std::string, FileType> types;
     std::vector<std::string> extensions;
-    std::vector<std::string> dictionary; // Словарь для реалистичного текста
-
-    // Создание контента одного файла (или склейки)
+    std::vector<std::string> dictionary; // РЎР»РѕРІР°СЂСЊ РґР»СЏ СЂРµР°Р»РёСЃС‚РёС‡РЅРѕРіРѕ С‚РµРєСЃС‚Р°
+    
+    // РЎРѕР·РґР°РЅРёРµ РєРѕРЅС‚РµРЅС‚Р° РѕРґРЅРѕРіРѕ С„Р°Р№Р»Р° (РёР»Рё СЃРєР»РµР№РєРё)
     std::pair<std::string, std::string> create_payload(std::mt19937& rng, bool is_mixed);
 
-    // Заполнение мусором (с ловушками или словами)
+    // Р—Р°РїРѕР»РЅРµРЅРёРµ РјСѓСЃРѕСЂРѕРј (СЃ Р»РѕРІСѓС€РєР°РјРё РёР»Рё СЃР»РѕРІР°РјРё)
     void fill_complex(std::stringstream& ss, size_t count, bool is_text, std::mt19937& rng);
 
-    // Выбор реалистичного размера в зависимости от типа
+    // РџРѕРґР±РёСЂР°РµС‚ Р°РґРµРєРІР°С‚РЅС‹Р№ СЂР°Р·РјРµСЂ (РІРёРґРµРѕ РїРѕР±РѕР»СЊС€Рµ, С‚РµРєСЃС‚ РїРѕРјРµРЅСЊС€Рµ)
     size_t get_realistic_size(const std::string& ext, std::mt19937& rng);
 
-    // Универсальный метод записи (limit_type: 0 = count, 1 = bytes)
+    // РЈРЅРёРІРµСЂСЃР°Р»СЊРЅС‹Р№ РјРµС‚РѕРґ Р·Р°РїРёСЃРё (limit_type: 0 = count, 1 = bytes)
     void write_generic(const std::filesystem::path& path, size_t limit, int limit_type, OutputMode mode, double mix_ratio, GenStats& stats);
 
     uint32_t calculate_crc32(const std::string& data);
