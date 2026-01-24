@@ -244,9 +244,9 @@ void print_usage() {
 }
 
 int main(int argc, char* argv[]) {
-    std::string amount_str = "50";
+    std::string amount_str = "10";
     double mix = 0.0;
-    OutputMode mode = OutputMode::FOLDER;
+    OutputMode mode = OutputMode::BIN;
 
     std::string out_base_name = "dataset";
     fs::path out_path;

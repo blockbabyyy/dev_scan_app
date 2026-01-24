@@ -120,3 +120,22 @@ target_link_libraries(RegexBenchTests PRIVATE
 
 include(GoogleTest)
 gtest_discover_tests(RegexBenchTests)
+
+
+add_executable(Benchmarks tests/Benchmarks.cpp src/Scaner.cpp src/generator/Generator.cpp)
+# Подключаем папки include
+target_include_directories(Benchmarks PRIVATE 
+    ${CMAKE_SOURCE_DIR}/include 
+    ${CMAKE_SOURCE_DIR}/src
+)
+
+# Линкуем библиотеки (те же, что и для main app)
+target_link_libraries(Benchmarks PRIVATE
+    re2::re2
+    Boost::regex
+    benchmark::benchmark
+    benchmark::benchmark_main
+    ${HYPERSCAN_LIBRARY}
+    Psapi
+    absl::base
+)

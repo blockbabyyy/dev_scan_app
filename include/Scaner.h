@@ -40,6 +40,10 @@ using GenStats = ScanStats;
 
 class Scanner {
 public:
+
+    // [NEW] Флаг для отключения вывода в консоль
+    static bool SilentMode;
+
     virtual ~Scanner() = default;
     virtual void prepare() {}
     virtual void scan(const char* data, size_t size, ScanStats& stats) = 0;

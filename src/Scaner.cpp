@@ -14,6 +14,10 @@
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ==========================================
 
+// [NEW] Инициализация статического флага
+bool Scanner::SilentMode = false;
+
+
 inline bool pre_check(const char* data, size_t size, const std::string& head, const std::string& tail = "") {
     std::string_view sv(data, size);
     size_t head_pos = 0;
@@ -81,14 +85,20 @@ void StdScanner::scan(const char* d, size_t s, ScanStats& st) {
             if (m_use_pre_check && !pre_check(d, s, head_check, tail_check)) {
                 return;
             }
-
-            std::cout << "\r[StdScanner] Scanning: " << std::left << std::setw(10) << label << " | Found: " << counter << std::flush;
+            // [UPDATED] Скрываем вывод если SilentMode
+            if (!Scanner::SilentMode) {
+                std::cout << "\r[StdScanner] Scanning: " << std::left << std::setw(10) << label << " | Found: " << counter << std::flush;
+            }
+            
             const char* start = d; const char* end = d + s; std::cmatch m;
             try {
                 if (re.mark_count() == 0 && std::string(start, std::min((size_t)1, s)).empty()) return;
                 while (start < end && std::regex_search(start, end, m, re)) {
                     counter++;
-                    std::cout << "\r[StdScanner] Scanning: " << std::left << std::setw(10) << label << " | Found: " << counter << std::flush;
+                    // [UPDATED] Скрываем вывод
+                    if (!Scanner::SilentMode) {
+                        std::cout << "\r[StdScanner] Scanning: " << std::left << std::setw(10) << label << " | Found: " << counter << std::flush;
+                    }
                     start += m.position() + std::max((std::ptrdiff_t)1, m.length());
                 }
             }
@@ -117,7 +127,7 @@ void StdScanner::scan(const char* d, size_t s, ScanStats& st) {
     run_check("EML", r_eml, st.eml, "From:");
 
     fix_counters(st);
-    std::cout << "\r[StdScanner] Done.                                           \n";
+    if (!Scanner::SilentMode) std::cout << "\r[StdScanner] Done.\n";
 }
 
 // ==========================================
