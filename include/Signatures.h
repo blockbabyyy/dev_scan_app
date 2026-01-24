@@ -24,13 +24,17 @@ namespace Sig {
 
         const std::string RAR4("\x52\x61\x72\x21\x1A\x07\x00", 7);
         const std::string RAR5("\x52\x61\x72\x21\x1A\x07\x01\x00", 8);
+
         const std::string PNG_HEAD = "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A";
         const std::string PNG_TAIL = "\x49\x45\x4E\x44\xAE\x42\x60\x82";
+
         const std::string JPG_HEAD = "\xFF\xD8\xFF";
         const std::string JPG_TAIL = "\xFF\xD9";
+
         const std::string GIF_HEAD = "\x47\x49\x46\x38";
         const std::string GIF_TAIL("\x00\x3B", 2);
-        const std::string BMP_HEAD = "\x42\x4D[\\s\\S]{4}\\x00\\x00"; // BMP оставляем как есть, это короткий паттерн
+
+        const std::string BMP_HEAD = "\x42\x4D[\\s\\S]{4}\\x00\\x00";
 
         const std::string MKV = "\x1A\x45\xDF\xA3";
         const std::string MP3 = "\x49\x44\x33";
@@ -54,7 +58,7 @@ namespace Sig {
     }
 
     const std::string ANY = "[\\s\\S]";
-    const std::string LIMIT_STD = "{0,10000000}";
+    const std::string LIMIT_STD = "{0,60000000}";
 
     // --- ЛОГИКА ГЕНЕРАЦИИ ---
 
@@ -67,10 +71,8 @@ namespace Sig {
         // Для OLE (Старый офис) нужен заголовок + маркер
         if (head_raw == Bin::OLE) {
             std::string mid;
-            // [FIX] Для RE2 используем точку (.) вместо ANY ([\s\S]), 
-            // так как set_dot_nl(true) включен, а [\s\S]*? может сбоить.
             if constexpr (E == Engine::RE2) mid = ".*?";
-            else mid = ANY + "{0,50000}";
+            else mid = ANY + "{0,1000}"; // Уменьшаем лимит OLE для надежности
 
             return raw_to_hex(head_raw) + mid + raw_to_hex(marker_raw);
         }
@@ -81,8 +83,17 @@ namespace Sig {
 
     template <Engine E>
     std::string framed(const std::string& head_raw, const std::string& tail_raw) {
-        if (head_raw == Bin::ZIP_HEAD && E != Engine::HS) {
-            return raw_to_hex(tail_raw);
+        // [FIX] Спасение std::regex
+        // Для бинарных файлов (PNG, JPG, PDF, ZIP) в режиме STD 
+        // мы ищем ТОЛЬКО ЗАГОЛОВОК (или хвост). 
+        // Поиск диапазона .* на файлах > 1 МБ убивает std::regex.
+        if constexpr (E == Engine::STD) {
+            // Для ZIP - хвост (EOCD), так надежнее
+            if (head_raw == Bin::ZIP_HEAD) return raw_to_hex(tail_raw);
+
+            // Для остальных (PDF, PNG, JPG) - заголовок
+            // Это превращает поиск в простой скан сигнатуры, что работает молниеносно.
+            return raw_to_hex(head_raw);
         }
 
         std::string head = raw_to_hex(head_raw);
@@ -92,18 +103,20 @@ namespace Sig {
             return head + ".*?" + tail;
         }
         else if constexpr (E == Engine::RE2) {
-            // [FIX] RE2: используем точку (.) с ленивым квантификатором *?
             return head + ".*?" + tail;
         }
         else {
+            // Boost пусть мучается с диапазоном (он чуть крепче), 
+            // но тоже может упасть. Если упадет - переведем и его на head-only.
             return head + ANY + LIMIT_STD + "?" + tail;
         }
     }
 
     template <Engine E>
     std::string framed_text(const std::string& head, const std::string& tail) {
+        // Текст оставляем как есть (обычно файлы меньше)
         if constexpr (E == Engine::HS) return head + ".*?" + tail;
-        else if constexpr (E == Engine::RE2) return head + ".*?" + tail; // [FIX] точка вместо ANY
+        else if constexpr (E == Engine::RE2) return head + ".*?" + tail;
         else return head + ANY + LIMIT_STD + "?" + tail;
     }
 }

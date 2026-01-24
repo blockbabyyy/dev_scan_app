@@ -4,111 +4,67 @@
 #include <memory>
 #include <regex>
 #include <iostream>
-
-// Подключаем Boost (нужен для определения членов класса BoostScanner)
 #include <boost/regex.hpp>
 
-// Forward declarations для сторонних библиотек, чтобы не тянуть их хедеры сюда,
-// если не обязательно (хотя для unique_ptr RE2 нужен полный тип в cpp, здесь достаточно forward decl,
-// но проще подключить в cpp, а здесь использовать указатели).
 namespace re2 { class RE2; }
 struct hs_database;
 struct hs_scratch;
 
-// ==========================================
-// Структура статистики
-// ==========================================
+// Статистика (без изменений)
 struct ScanStats {
-    // Общие счетчики
     int total_files = 0;
+    int pdf = 0, zip = 0, rar = 0;
+    int png = 0, jpg = 0, gif = 0, bmp = 0;
+    int mkv = 0, mp3 = 0;
+    int doc = 0, xls = 0, ppt = 0;
+    int docx = 0, xlsx = 0, pptx = 0;
+    int html = 0, xml = 0, json = 0, eml = 0;
+    int ole = 0, unknown = 0;
 
-    // Архивы
-    int pdf = 0;
-    int zip = 0;
-    int rar = 0;
-
-    // Картинки
-    int png = 0;
-    int jpg = 0;
-    int gif = 0;
-    int bmp = 0;
-
-    // Медиа
-    int mkv = 0;
-    int mp3 = 0;
-
-    // Office Legacy (OLE)
-    int doc = 0;
-    int xls = 0;
-    int ppt = 0;
-
-    // Office OpenXML (XML inside ZIP)
-    int docx = 0;
-    int xlsx = 0;
-    int pptx = 0;
-
-    // Текст
-    int html = 0;
-    int xml = 0;
-    int json = 0;
-    int eml = 0;
-
-    // Служебные
-    int ole = 0;     // Просто контейнер OLE (без уточнения типа)
-    int unknown = 0; // Не распознано
-
-    // Метод для суммирования результатов (нужен для многопоточности или агрегации)
-    ScanStats& operator+=(const ScanStats& other);
-
-    // Метод для красивого вывода
-    void print(const std::string& name) const;
-
-    // Сброс
     void reset() { *this = ScanStats(); }
+
+    ScanStats& operator+=(const ScanStats& other) {
+        total_files += other.total_files;
+        pdf += other.pdf; zip += other.zip; rar += other.rar;
+        png += other.png; jpg += other.jpg; gif += other.gif; bmp += other.bmp;
+        mkv += other.mkv; mp3 += other.mp3;
+        doc += other.doc; xls += other.xls; ppt += other.ppt;
+        docx += other.docx; xlsx += other.xlsx; pptx += other.pptx;
+        html += other.html; xml += other.xml; json += other.json; eml += other.eml;
+        ole += other.ole; unknown += other.unknown;
+        return *this;
+    }
 };
 
-// GenStats — это то же самое, что ScanStats (статистика генератора)
 using GenStats = ScanStats;
 
-// ==========================================
-// Базовый интерфейс Сканера
-// ==========================================
 class Scanner {
 public:
     virtual ~Scanner() = default;
-
-    // Подготовка (нужна для Hyperscan для аллокации scratch memory)
     virtual void prepare() {}
-
-    // Основной метод сканирования
     virtual void scan(const char* data, size_t size, ScanStats& stats) = 0;
-
-    // Имя движка
     virtual std::string name() const = 0;
 };
 
-// ==========================================
-// Реализации сканеров
-// ==========================================
-
-// 1. std::regex
+// 1. std::regex (с опциональным pre_check)
 class StdScanner : public Scanner {
 public:
-    StdScanner();
+    StdScanner(bool use_pre_check = true); // [UPDATED]
     ~StdScanner() override;
     std::string name() const override;
     void scan(const char* data, size_t size, ScanStats& stats) override;
 
 private:
+    bool m_use_pre_check; // [NEW]
     std::regex r_pdf, r_zip, r_rar4, r_rar5;
     std::regex r_png, r_jpg, r_gif, r_bmp;
     std::regex r_mkv, r_mp3;
-    std::regex r_doc, r_xls, r_ppt;       // OLE
-    std::regex r_docx, r_xlsx, r_pptx;    // XML markers
+    std::regex r_doc, r_xls, r_ppt;
+    std::regex r_docx, r_xlsx, r_pptx;
     std::regex r_html, r_xml, r_json, r_eml;
 };
 
-// 2. Google RE2
+// 2. Google RE2 (без изменений)
 class Re2Scanner : public Scanner {
 public:
     Re2Scanner();
@@ -117,7 +73,6 @@ public:
     void scan(const char* data, size_t size, ScanStats& stats) override;
 
 private:
-    // Используем unique_ptr, чтобы не инклюдить re2.h в хедер
     std::unique_ptr<re2::RE2> r_pdf, r_zip;
     std::unique_ptr<re2::RE2> r_rar4, r_rar5;
     std::unique_ptr<re2::RE2> r_png, r_jpg, r_gif, r_bmp;
@@ -127,15 +82,16 @@ private:
     std::unique_ptr<re2::RE2> r_html, r_xml, r_json, r_eml;
 };
 
-// 3. Boost.Regex
+// 3. Boost.Regex (с опциональным pre_check)
 class BoostScanner : public Scanner {
 public:
-    BoostScanner();
+    BoostScanner(bool use_pre_check = true); // [UPDATED]
     ~BoostScanner() override;
     std::string name() const override;
     void scan(const char* data, size_t size, ScanStats& stats) override;
 
 private:
+    bool m_use_pre_check; // [NEW]
     boost::regex r_pdf, r_zip;
     boost::regex r_rar4, r_rar5;
     boost::regex r_png, r_jpg, r_gif, r_bmp;
@@ -145,21 +101,18 @@ private:
     boost::regex r_html, r_xml, r_json, r_eml;
 };
 
-// 4. Intel Hyperscan
+// 4. Intel Hyperscan (без изменений)
 class HsScanner : public Scanner {
 public:
     HsScanner();
     ~HsScanner() override;
-
-    void prepare() override; // Alloc scratch
+    void prepare() override;
     std::string name() const override;
     void scan(const char* data, size_t size, ScanStats& stats) override;
 
 private:
-    struct hs_database* db = nullptr;
-    struct hs_scratch* scratch = nullptr;
-
-    // ID для Hyperscan (enum для switch-case в callback)
+    hs_database* db = nullptr;
+    hs_scratch* scratch = nullptr;
     enum {
         ID_DOC = 1, ID_XLS, ID_PPT,
         ID_DOCX, ID_XLSX, ID_PPTX,

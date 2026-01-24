@@ -10,16 +10,17 @@
 // Используем ту же структуру статистики, что и сканер, чтобы не плодить сущности
 using GenStats = ScanStats;
 
+enum class OutputMode {
+    FOLDER, // Папка с файлами
+    BIN,    // Бинарная склейка 
+    PCAP,   // Эмуляция дампа трафика (файлы как payload пакетов)
+    ZIP     // ZIP-архив без сжатия (Store)
+};
 
 
 class DataSetGenerator {
 public:
-    enum class OutputMode {
-        FOLDER, // Папка с файлами
-        BIN,    // Бинарная склейка 
-        PCAP,   // Эмуляция дампа трафика (файлы как payload пакетов)
-        ZIP     // ZIP-архив без сжатия (Store)
-    };
+
 
     
 

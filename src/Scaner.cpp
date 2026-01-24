@@ -14,92 +14,53 @@
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ==========================================
 
-// Быстрая пред-проверка (Pre-check).
-// Используется ТОЛЬКО в StdScanner для оптимизации.
-// Проверяет наличие подстрок head и tail перед запуском тяжелой регулярки.
 inline bool pre_check(const char* data, size_t size, const std::string& head, const std::string& tail = "") {
-    if (head.empty()) {
-        return true;
-    }
-
     std::string_view sv(data, size);
-    size_t head_pos = sv.find(head);
-
-    if (head_pos == std::string_view::npos) {
-        return false;
+    size_t head_pos = 0;
+    if (!head.empty()) {
+        head_pos = sv.find(head);
+        if (head_pos == std::string_view::npos) return false;
     }
-
     if (!tail.empty()) {
-        // Ищем хвост строго после заголовка
-        if (sv.find(tail, head_pos + 1) == std::string_view::npos) {
-            return false;
-        }
+        size_t search_start = head.empty() ? 0 : head_pos + 1;
+        if (sv.find(tail, search_start) == std::string_view::npos) return false;
     }
     return true;
 }
 
-// Пост-коррекция счетчиков.
-// Так как DOCX/XLSX/PPTX технически являются ZIP-архивами,
-// сканеры могут находить ZIP-сигнатуры внутри них.
-// Мы вычитаем количество офисных файлов из ZIP, чтобы получить "чистые" архивы.
 inline void fix_counters(ScanStats& st) {
-    int office_xml = 0;
-    office_xml += st.docx;
-    office_xml += st.xlsx;
-    office_xml += st.pptx;
-
-    if (st.zip >= office_xml) {
-        st.zip -= office_xml;
-    }
-    else {
-        // Защита от отрицательных значений (если вдруг regex ошибся)
-        st.zip = 0;
-    }
+    int office_xml = st.docx + st.xlsx + st.pptx;
+    if (st.zip >= office_xml) st.zip -= office_xml;
+    else st.zip = 0;
 }
 
 // ==========================================
 // StdScanner
 // ==========================================
-// Использует std::regex. Самый медленный, требует pre_check.
-
-StdScanner::StdScanner() {
+StdScanner::StdScanner(bool use_pre_check) : m_use_pre_check(use_pre_check) {
     auto f = std::regex::optimize;
     auto fi = std::regex::optimize | std::regex::icase;
-
     auto safe_compile = [&](std::regex& target, const std::string& pat, auto flags, const char* name) {
-        try {
-            target.assign(pat, flags);
-        }
-        catch (const std::regex_error& e) {
-            std::cerr << "[StdScanner] Error compiling " << name << ": " << e.what() << "\n";
-        }
+        try { target.assign(pat, flags); }
+        catch (const std::regex_error& e) { std::cerr << "[StdScanner] Error " << name << ": " << e.what() << "\n"; }
         };
 
-    // Компиляция сигнатур
     safe_compile(r_doc, Sig::complex<Sig::Engine::STD>(Sig::Bin::OLE, Sig::Bin::OLE_WORD), f, "DOC");
     safe_compile(r_xls, Sig::complex<Sig::Engine::STD>(Sig::Bin::OLE, Sig::Bin::OLE_XL), f, "XLS");
     safe_compile(r_ppt, Sig::complex<Sig::Engine::STD>(Sig::Bin::OLE, Sig::Bin::OLE_PPT), f, "PPT");
-
     safe_compile(r_docx, Sig::complex<Sig::Engine::STD>(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_WORD), f, "DOCX");
     safe_compile(r_xlsx, Sig::complex<Sig::Engine::STD>(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_XL), f, "XLSX");
     safe_compile(r_pptx, Sig::complex<Sig::Engine::STD>(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_PPT), f, "PPTX");
-
-    // Для ZIP ищем только EOCD (хвост)
     safe_compile(r_zip, Sig::framed<Sig::Engine::STD>(Sig::Bin::ZIP_HEAD, Sig::Bin::ZIP_TAIL), f, "ZIP");
-
     safe_compile(r_pdf, Sig::framed<Sig::Engine::STD>(Sig::Bin::PDF_HEAD, Sig::Bin::PDF_TAIL), f, "PDF");
-
     safe_compile(r_png, Sig::framed<Sig::Engine::STD>(Sig::Bin::PNG_HEAD, Sig::Bin::PNG_TAIL), f, "PNG");
     safe_compile(r_jpg, Sig::framed<Sig::Engine::STD>(Sig::Bin::JPG_HEAD, Sig::Bin::JPG_TAIL), f, "JPG");
     safe_compile(r_gif, Sig::framed<Sig::Engine::STD>(Sig::Bin::GIF_HEAD, Sig::Bin::GIF_TAIL), f, "GIF");
-
     safe_compile(r_rar4, Sig::raw_to_hex(Sig::Bin::RAR4), f, "RAR4");
     safe_compile(r_rar5, Sig::raw_to_hex(Sig::Bin::RAR5), f, "RAR5");
     safe_compile(r_bmp, Sig::Bin::BMP_HEAD, f, "BMP");
-
     safe_compile(r_mkv, Sig::raw_to_hex(Sig::Bin::MKV), f, "MKV");
     safe_compile(r_mp3, Sig::raw_to_hex(Sig::Bin::MP3), f, "MP3");
-
     safe_compile(r_html, Sig::framed_text<Sig::Engine::STD>(Sig::Text::HTML_HEAD, Sig::Text::HTML_TAIL), fi, "HTML");
     safe_compile(r_xml, Sig::Text::XML, fi, "XML");
     safe_compile(r_json, Sig::framed_text<Sig::Engine::STD>(Sig::Text::JSON_HEAD, Sig::Text::JSON_TAIL), f, "JSON");
@@ -108,143 +69,99 @@ StdScanner::StdScanner() {
 
 StdScanner::~StdScanner() = default;
 
-std::string StdScanner::name() const { return "std::regex"; }
+std::string StdScanner::name() const {
+    return m_use_pre_check ? "std::regex (Opt)" : "std::regex (Raw)";
+}
 
 void StdScanner::scan(const char* d, size_t s, ScanStats& st) {
     auto run_check = [&](const std::string& label, const std::regex& re, int& counter,
         const std::string& head_check = "", const std::string& tail_check = "") {
 
-            // 1. Быстрая проверка (Optimization)
-            if (!pre_check(d, s, head_check, tail_check)) {
+            // [FIX] Используем флаг
+            if (m_use_pre_check && !pre_check(d, s, head_check, tail_check)) {
                 return;
             }
 
-            std::cout << "\r[StdScanner] Scanning: " << std::left << std::setw(10) << label
-                << " | Found: " << counter << std::flush;
-
-            const char* start = d;
-            const char* end = d + s;
-            std::cmatch m;
-
+            std::cout << "\r[StdScanner] Scanning: " << std::left << std::setw(10) << label << " | Found: " << counter << std::flush;
+            const char* start = d; const char* end = d + s; std::cmatch m;
             try {
                 if (re.mark_count() == 0 && std::string(start, std::min((size_t)1, s)).empty()) return;
-
                 while (start < end && std::regex_search(start, end, m, re)) {
                     counter++;
-                    std::cout << "\r[StdScanner] Scanning: " << std::left << std::setw(10) << label
-                        << " | Found: " << counter << std::flush;
-
-                    auto shift = std::max((std::ptrdiff_t)1, m.length());
-                    start += m.position() + shift;
+                    std::cout << "\r[StdScanner] Scanning: " << std::left << std::setw(10) << label << " | Found: " << counter << std::flush;
+                    start += m.position() + std::max((std::ptrdiff_t)1, m.length());
                 }
             }
             catch (...) {}
         };
 
-    // Запуск сканирования с pre_check аргументами
     run_check("DOC", r_doc, st.doc, Sig::Bin::OLE, Sig::Bin::OLE_WORD);
     run_check("XLS", r_xls, st.xls, Sig::Bin::OLE, Sig::Bin::OLE_XL);
     run_check("PPT", r_ppt, st.ppt, Sig::Bin::OLE, Sig::Bin::OLE_PPT);
-
     run_check("DOCX", r_docx, st.docx, Sig::Bin::ZIP_HEAD, Sig::Bin::XML_WORD);
     run_check("XLSX", r_xlsx, st.xlsx, Sig::Bin::ZIP_HEAD, Sig::Bin::XML_XL);
     run_check("PPTX", r_pptx, st.pptx, Sig::Bin::ZIP_HEAD, Sig::Bin::XML_PPT);
-
-    // Для ZIP проверяем только EOCD
     run_check("ZIP", r_zip, st.zip, "", Sig::Bin::ZIP_TAIL);
-
     run_check("PDF", r_pdf, st.pdf, Sig::Bin::PDF_HEAD, Sig::Bin::PDF_TAIL);
     run_check("RAR4", r_rar4, st.rar, Sig::Bin::RAR4);
     run_check("RAR5", r_rar5, st.rar, Sig::Bin::RAR5);
-
     run_check("PNG", r_png, st.png, Sig::Bin::PNG_HEAD, Sig::Bin::PNG_TAIL);
     run_check("JPG", r_jpg, st.jpg, Sig::Bin::JPG_HEAD, Sig::Bin::JPG_TAIL);
     run_check("GIF", r_gif, st.gif, Sig::Bin::GIF_HEAD, Sig::Bin::GIF_TAIL);
     run_check("BMP", r_bmp, st.bmp, "BM");
-
     run_check("MKV", r_mkv, st.mkv, Sig::Bin::MKV);
     run_check("MP3", r_mp3, st.mp3, Sig::Bin::MP3);
-
     run_check("HTML", r_html, st.html, "<html", "</html>");
     run_check("XML", r_xml, st.xml, "<?xml");
     run_check("JSON", r_json, st.json, "{", "}");
     run_check("EML", r_eml, st.eml, "From:");
 
-    // Финальная коррекция категорий
     fix_counters(st);
-
     std::cout << "\r[StdScanner] Done.                                           \n";
 }
 
 // ==========================================
-// Re2Scanner
-// ==========================================
-// Использует Google RE2. Работает БЕЗ pre_check (честный бенчмарк).
-
-// ==========================================
-// Re2Scanner
+// Re2Scanner (Без pre_check, только EncodingLatin1)
 // ==========================================
 Re2Scanner::Re2Scanner() {
     auto compile = [&](std::unique_ptr<re2::RE2>& target, const std::string& pat) {
         re2::RE2::Options opt;
-
-        // [FIX] Критически важно для бинарных файлов!
-        // По умолчанию RE2 ожидает UTF-8 и точка (.) не матчит "битые" байты.
-        // EncodingLatin1 заставляет RE2 работать с сырыми байтами.
-        opt.set_encoding(re2::RE2::Options::EncodingLatin1);
-
-        opt.set_dot_nl(true);           // Точка матчит \n
-        opt.set_case_sensitive(false);  // Регистронезависимость
-
+        opt.set_encoding(re2::RE2::Options::EncodingLatin1); // Важно для бинарников
+        opt.set_dot_nl(true);
+        opt.set_case_sensitive(false);
         target = std::make_unique<re2::RE2>(pat, opt);
-
-        if (!target->ok()) {
-            std::cerr << "\n[Re2Scanner] Error compiling regex: " << target->error()
-                << " | Pattern: " << pat.substr(0, 50) << "...\n";
-        }
+        if (!target->ok()) std::cerr << "\n[Re2Scanner] Error: " << target->error() << "\n";
         };
 
-    // Дальше код без изменений
     compile(r_doc, Sig::complex<Sig::Engine::RE2>(Sig::Bin::OLE, Sig::Bin::OLE_WORD));
     compile(r_xls, Sig::complex<Sig::Engine::RE2>(Sig::Bin::OLE, Sig::Bin::OLE_XL));
     compile(r_ppt, Sig::complex<Sig::Engine::RE2>(Sig::Bin::OLE, Sig::Bin::OLE_PPT));
-
     compile(r_docx, Sig::complex<Sig::Engine::RE2>(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_WORD));
     compile(r_xlsx, Sig::complex<Sig::Engine::RE2>(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_XL));
     compile(r_pptx, Sig::complex<Sig::Engine::RE2>(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_PPT));
-
     compile(r_zip, Sig::framed<Sig::Engine::RE2>(Sig::Bin::ZIP_HEAD, Sig::Bin::ZIP_TAIL));
     compile(r_pdf, Sig::framed<Sig::Engine::RE2>(Sig::Bin::PDF_HEAD, Sig::Bin::PDF_TAIL));
-
     compile(r_png, Sig::framed<Sig::Engine::RE2>(Sig::Bin::PNG_HEAD, Sig::Bin::PNG_TAIL));
     compile(r_jpg, Sig::framed<Sig::Engine::RE2>(Sig::Bin::JPG_HEAD, Sig::Bin::JPG_TAIL));
     compile(r_gif, Sig::framed<Sig::Engine::RE2>(Sig::Bin::GIF_HEAD, Sig::Bin::GIF_TAIL));
-
     compile(r_rar4, Sig::raw_to_hex(Sig::Bin::RAR4));
     compile(r_rar5, Sig::raw_to_hex(Sig::Bin::RAR5));
     compile(r_bmp, Sig::Bin::BMP_HEAD);
-
     compile(r_mkv, Sig::raw_to_hex(Sig::Bin::MKV));
     compile(r_mp3, Sig::raw_to_hex(Sig::Bin::MP3));
-
     compile(r_html, Sig::framed_text<Sig::Engine::RE2>(Sig::Text::HTML_HEAD, Sig::Text::HTML_TAIL));
     compile(r_xml, Sig::Text::XML);
     compile(r_json, Sig::framed_text<Sig::Engine::RE2>(Sig::Text::JSON_HEAD, Sig::Text::JSON_TAIL));
     compile(r_eml, Sig::Text::EML);
 }
-
 Re2Scanner::~Re2Scanner() = default;
 std::string Re2Scanner::name() const { return "Google RE2"; }
 
 void Re2Scanner::scan(const char* data, size_t size, ScanStats& stats) {
-    // Чистый RE2 без pre_check
     auto run = [&](const std::unique_ptr<re2::RE2>& re, int& cnt) {
         re2::StringPiece input(data, size);
-        while (re2::RE2::FindAndConsume(&input, *re)) {
-            cnt++;
-        }
+        while (re2::RE2::FindAndConsume(&input, *re)) { cnt++; }
         };
-
     run(r_doc, stats.doc); run(r_xls, stats.xls); run(r_ppt, stats.ppt);
     run(r_docx, stats.docx); run(r_xlsx, stats.xlsx); run(r_pptx, stats.pptx);
     run(r_zip, stats.zip); run(r_pdf, stats.pdf);
@@ -252,92 +169,87 @@ void Re2Scanner::scan(const char* data, size_t size, ScanStats& stats) {
     run(r_rar4, stats.rar); run(r_rar5, stats.rar); run(r_bmp, stats.bmp);
     run(r_mkv, stats.mkv); run(r_mp3, stats.mp3);
     run(r_html, stats.html); run(r_xml, stats.xml); run(r_json, stats.json); run(r_eml, stats.eml);
-
     fix_counters(stats);
 }
 
 // ==========================================
 // BoostScanner
 // ==========================================
-// Использует Boost.Regex. Работает БЕЗ pre_check.
-
-BoostScanner::BoostScanner() {
+BoostScanner::BoostScanner(bool use_pre_check) : m_use_pre_check(use_pre_check) {
     auto f = boost::regex::optimize;
     auto fi = boost::regex::optimize | boost::regex::icase;
 
     r_doc.assign(Sig::complex<Sig::Engine::BOOST>(Sig::Bin::OLE, Sig::Bin::OLE_WORD), f);
     r_xls.assign(Sig::complex<Sig::Engine::BOOST>(Sig::Bin::OLE, Sig::Bin::OLE_XL), f);
     r_ppt.assign(Sig::complex<Sig::Engine::BOOST>(Sig::Bin::OLE, Sig::Bin::OLE_PPT), f);
-
     r_docx.assign(Sig::complex<Sig::Engine::BOOST>(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_WORD), f);
     r_xlsx.assign(Sig::complex<Sig::Engine::BOOST>(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_XL), f);
     r_pptx.assign(Sig::complex<Sig::Engine::BOOST>(Sig::Bin::ZIP_HEAD, Sig::Bin::XML_PPT), f);
-
     r_zip.assign(Sig::framed<Sig::Engine::BOOST>(Sig::Bin::ZIP_HEAD, Sig::Bin::ZIP_TAIL), f);
     r_pdf.assign(Sig::framed<Sig::Engine::BOOST>(Sig::Bin::PDF_HEAD, Sig::Bin::PDF_TAIL), f);
-
     r_png.assign(Sig::framed<Sig::Engine::BOOST>(Sig::Bin::PNG_HEAD, Sig::Bin::PNG_TAIL), f);
     r_jpg.assign(Sig::framed<Sig::Engine::BOOST>(Sig::Bin::JPG_HEAD, Sig::Bin::JPG_TAIL), f);
     r_gif.assign(Sig::framed<Sig::Engine::BOOST>(Sig::Bin::GIF_HEAD, Sig::Bin::GIF_TAIL), f);
-
     r_rar4.assign(Sig::raw_to_hex(Sig::Bin::RAR4), f);
     r_rar5.assign(Sig::raw_to_hex(Sig::Bin::RAR5), f);
     r_bmp.assign(Sig::Bin::BMP_HEAD, f);
-
     r_mkv.assign(Sig::raw_to_hex(Sig::Bin::MKV), f);
     r_mp3.assign(Sig::raw_to_hex(Sig::Bin::MP3), f);
-
     r_html.assign(Sig::framed_text<Sig::Engine::BOOST>(Sig::Text::HTML_HEAD, Sig::Text::HTML_TAIL), fi);
     r_xml.assign(Sig::Text::XML, fi);
     r_json.assign(Sig::framed_text<Sig::Engine::BOOST>(Sig::Text::JSON_HEAD, Sig::Text::JSON_TAIL), f);
     r_eml.assign(Sig::Text::EML, fi);
 }
-
 BoostScanner::~BoostScanner() = default;
 
-std::string BoostScanner::name() const { return "Boost.Regex"; }
+std::string BoostScanner::name() const {
+    return m_use_pre_check ? "Boost.Regex (Opt)" : "Boost.Regex (Raw)";
+}
 
 void BoostScanner::scan(const char* data, size_t size, ScanStats& stats) {
-    // Чистый запуск Boost
-    auto run = [&](const boost::regex& re, int& cnt) {
-        boost::cmatch m;
-        const char* start = data;
-        const char* end = data + size;
-        while (boost::regex_search(start, end, m, re)) {
-            cnt++;
-            start += m.position() + std::max((std::ptrdiff_t)1, m.length());
-        }
+    // [FIX] Обновили сигнатуру лямбды, чтобы принимать сигнатуры для pre_check
+    auto run = [&](const boost::regex& re, int& cnt,
+        const std::string& head_check = "", const std::string& tail_check = "") {
+
+            if (m_use_pre_check && !pre_check(data, size, head_check, tail_check)) {
+                return;
+            }
+
+            boost::cmatch m;
+            const char* start = data;
+            const char* end = data + size;
+            while (boost::regex_search(start, end, m, re)) {
+                cnt++;
+                start += m.position() + std::max((std::ptrdiff_t)1, m.length());
+            }
         };
 
-    run(r_doc, stats.doc);
-    run(r_xls, stats.xls);
-    run(r_ppt, stats.ppt);
+    // Передаем строки для pre_check (копии из StdScanner)
+    run(r_doc, stats.doc, Sig::Bin::OLE, Sig::Bin::OLE_WORD);
+    run(r_xls, stats.xls, Sig::Bin::OLE, Sig::Bin::OLE_XL);
+    run(r_ppt, stats.ppt, Sig::Bin::OLE, Sig::Bin::OLE_PPT);
+    run(r_docx, stats.docx, Sig::Bin::ZIP_HEAD, Sig::Bin::XML_WORD);
+    run(r_xlsx, stats.xlsx, Sig::Bin::ZIP_HEAD, Sig::Bin::XML_XL);
+    run(r_pptx, stats.pptx, Sig::Bin::ZIP_HEAD, Sig::Bin::XML_PPT);
+    run(r_zip, stats.zip, "", Sig::Bin::ZIP_TAIL);
+    run(r_pdf, stats.pdf, Sig::Bin::PDF_HEAD, Sig::Bin::PDF_TAIL);
+    run(r_png, stats.png, Sig::Bin::PNG_HEAD, Sig::Bin::PNG_TAIL);
+    run(r_jpg, stats.jpg, Sig::Bin::JPG_HEAD, Sig::Bin::JPG_TAIL);
+    run(r_gif, stats.gif, Sig::Bin::GIF_HEAD, Sig::Bin::GIF_TAIL);
+    run(r_rar4, stats.rar, Sig::Bin::RAR4);
+    run(r_rar5, stats.rar, Sig::Bin::RAR5);
+    run(r_bmp, stats.bmp, "BM");
+    run(r_mkv, stats.mkv, Sig::Bin::MKV);
+    run(r_mp3, stats.mp3, Sig::Bin::MP3);
+    run(r_html, stats.html, "<html", "</html>");
+    run(r_xml, stats.xml, "<?xml");
+    run(r_json, stats.json, "{", "}");
+    run(r_eml, stats.eml, "From:");
 
-    run(r_docx, stats.docx);
-    run(r_xlsx, stats.xlsx);
-    run(r_pptx, stats.pptx);
-
-    run(r_zip, stats.zip);
-    run(r_pdf, stats.pdf);
-
-    run(r_png, stats.png);
-    run(r_jpg, stats.jpg);
-    run(r_gif, stats.gif);
-    run(r_rar4, stats.rar);
-    run(r_rar5, stats.rar);
-    run(r_bmp, stats.bmp);
-
-    run(r_mkv, stats.mkv);
-    run(r_mp3, stats.mp3);
-
-    run(r_html, stats.html);
-    run(r_xml, stats.xml);
-    run(r_json, stats.json);
-    run(r_eml, stats.eml);
-
-    // Финальная коррекция категорий
     fix_counters(stats);
 }
+
+// ... HsScanner без изменений ...
 
 // ==========================================
 // HsScanner
@@ -390,12 +302,17 @@ HsScanner::HsScanner() {
     };
 
     // Флаги: DOTALL (точка включает \n), CASELESS (регистронезависимо), UTF8
+    // [FIX] Убрали HS_FLAG_UTF8. Для бинарных файлов (ZIP, MP3, и т.д.)
+    // UTF-8 режим вреден, так как случайные байты могут ломать матчинг или вызывать ложные срабатывания.
+    // Оставляем только DOTALL и CASELESS.
     std::vector<unsigned int> flags;
-    for (int i = 0; i < 16; ++i) flags.push_back(HS_FLAG_DOTALL);
-    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8);
-    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8);
-    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_UTF8);
-    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8);
+    for (int i = 0; i < 16; ++i) flags.push_back(HS_FLAG_DOTALL); // Бинарники
+
+    // Для текста можно было бы оставить UTF8, но безопаснее тоже убрать, если поток смешанный
+    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS); // HTML
+    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS); // XML
+    flags.push_back(HS_FLAG_DOTALL);                    // JSON
+    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS); // EML
 
     hs_compile_error_t* err;
     if (hs_compile_multi(exprs, flags.data(), ids, 20, HS_MODE_BLOCK, nullptr, &db, &err) != HS_SUCCESS) {
