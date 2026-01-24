@@ -10,22 +10,18 @@
 // Используем ту же структуру статистики, что и сканер, чтобы не плодить сущности
 using GenStats = ScanStats;
 
-enum class OutputMode {
-    FOLDER, // Папка с файлами
-    BIN,    // Бинарная склейка 
-    PCAP,   // Эмуляция дампа трафика (файлы как payload пакетов)
-    ZIP     // ZIP-архив без сжатия (Store)
-};
+
 
 class DataSetGenerator {
 public:
-    struct FileType {
-        std::string extension;
-        std::string head;
-        std::string middle;
-        std::string tail;
-        bool is_text;
+    enum class OutputMode {
+        FOLDER, // Папка с файлами
+        BIN,    // Бинарная склейка 
+        PCAP,   // Эмуляция дампа трафика (файлы как payload пакетов)
+        ZIP     // ZIP-архив без сжатия (Store)
     };
+
+    
 
     DataSetGenerator();
 
@@ -36,9 +32,18 @@ public:
     GenStats generate_size(const std::filesystem::path& output_path, int size_mb, OutputMode mode, double mix_ratio = 0.0);
 
 private:
+    struct FileType {
+        std::string extension;
+        std::string head;
+        std::string middle;
+        std::string tail;
+        bool is_text;
+    };
+
     std::map<std::string, FileType> types;
     std::vector<std::string> extensions;
     std::vector<std::string> dictionary; // Словарь для реалистичного текста
+    uint32_t crc32_table[256];
     
     // Создание контента одного файла (или склейки)
     std::pair<std::string, std::string> create_payload(std::mt19937& rng, bool is_mixed);

@@ -184,15 +184,15 @@ int main(int argc, char* argv[]) {
     std::vector<std::unique_ptr<Scanner>> scanners;
 
     // Можно закомментировать ненужные для ускорения отладки
-    //scanners.push_back(std::make_unique<StdScanner>());
+    scanners.push_back(std::make_unique<StdScanner>());
     //scanners.push_back(std::make_unique<BoostScanner>());
     scanners.push_back(std::make_unique<Re2Scanner>());
 
     auto hs = std::make_unique<HsScanner>();
     hs->prepare();
-    scanners.push_back(std::move(hs));
+    //scanners.push_back(std::move(hs));
 
-    // 6. Запуск тестов
+    // Запуск тестов
     for (const auto& s : scanners) {
         run_benchmark(s.get(), out_path, mode == OutputMode::FOLDER, expected);
     }

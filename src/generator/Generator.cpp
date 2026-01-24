@@ -202,9 +202,9 @@ void DataSetGenerator::update_stats(const std::string& ext, GenStats& stats) {
     else if (ext == ".doc") stats.doc++;
     else if (ext == ".xls") stats.xls++;
     else if (ext == ".ppt") stats.ppt++;
-    else if (ext == ".docx") { stats.docx++; stats.zip++; }
-    else if (ext == ".xlsx") { stats.xlsx++; stats.zip++; }
-    else if (ext == ".pptx") { stats.pptx++; stats.zip++; }
+    else if (ext == ".docx") { stats.docx++; /*stats.zip++;*/ }
+    else if (ext == ".xlsx") { stats.xlsx++; /*stats.zip++;*/ }
+    else if (ext == ".pptx") { stats.pptx++; /*stats.zip++;*/ }
     else if (ext == ".json") stats.json++;
     else if (ext == ".html") stats.html++;
     else if (ext == ".xml") stats.xml++;
@@ -366,8 +366,11 @@ void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t l
         uint32_t cd_start = (uint32_t)f.tellp();
         for (const auto& e : zip_entries) {
             ZipDirHeader dh;
-            dh.crc32 = e.crc; dh.comp_size = e.sz; dh.uncomp_size = e.sz;
-            dh.name_len = (uint16_t)e.name.size(); dh.local_offset = e.off;
+            dh.crc32 = e.crc;
+            dh.comp_size = e.sz;
+            dh.uncomp_size = e.sz;
+            dh.name_len = (uint16_t)e.name.size();
+            dh.local_offset = e.off;
             f.write((char*)&dh, sizeof(dh));
             f.write(e.name.data(), e.name.size());
         }

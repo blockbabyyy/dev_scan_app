@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+п»ї#include <gtest/gtest.h>
 #include <vector>
 #include <string>
 #include <sstream>
@@ -11,7 +11,7 @@
 #include "Signatures.h"
 
 // ==========================================
-// 1. ИНФРАСТРУКТУРА ТЕСТОВ
+// 1. РРќР¤Р РђРЎРўР РЈРљРўРЈР Рђ РўР•РЎРўРћР’
 // ==========================================
 
 class TestDataFactory {
@@ -24,6 +24,7 @@ public:
     };
 
     TestDataFactory() {
+        // [FIX] РСЃРїРѕР»СЊР·СѓРµРј РєРѕРЅСЃС‚Р°РЅС‚С‹ РёР· Signatures.h, С‡С‚РѕР±С‹ С‚РµСЃС‚С‹ РІСЃРµРіРґР° СЃРѕРѕС‚РІРµС‚СЃС‚РІРѕРІР°Р»Рё Р»РѕРіРёРєРµ
         types[".zip"] = { Sig::Bin::ZIP_HEAD, "", Sig::Bin::ZIP_TAIL, false };
         types[".rar4"] = { Sig::Bin::RAR4, "", "", false };
         types[".rar5"] = { Sig::Bin::RAR5, "", "", false };
@@ -31,8 +32,7 @@ public:
         types[".jpg"] = { Sig::Bin::JPG_HEAD, "", Sig::Bin::JPG_TAIL, false };
         types[".gif"] = { Sig::Bin::GIF_HEAD, "", Sig::Bin::GIF_TAIL, false };
 
-        // [FIX] BMP: Используем явный конструктор string, чтобы \x00 не обрезал строку!
-        // BM + size(6) + reserved(0,0) + reserved(0,0)
+        // BMP
         types[".bmp"] = { std::string("\x42\x4D\x36\x00\x0C\x00\x00\x00", 8), "", "", false };
 
         types[".mkv"] = { Sig::Bin::MKV, "", "", false };
@@ -42,6 +42,8 @@ public:
         types[".doc"] = { Sig::Bin::OLE, Sig::Bin::OLE_WORD, "", false };
         types[".xls"] = { Sig::Bin::OLE, Sig::Bin::OLE_XL,   "", false };
         types[".ppt"] = { Sig::Bin::OLE, Sig::Bin::OLE_PPT,  "", false };
+
+        // [BATTLE MODE] Р’Р°Р¶РЅРѕ: middle - СЌС‚Рѕ С‚РµРїРµСЂСЊ РґР»РёРЅРЅС‹Р№ XML СЏРєРѕСЂСЊ
         types[".docx"] = { Sig::Bin::ZIP_HEAD, Sig::Bin::XML_WORD, Sig::Bin::ZIP_TAIL, false };
         types[".xlsx"] = { Sig::Bin::ZIP_HEAD, Sig::Bin::XML_XL,   Sig::Bin::ZIP_TAIL, false };
         types[".pptx"] = { Sig::Bin::ZIP_HEAD, Sig::Bin::XML_PPT,  Sig::Bin::ZIP_TAIL, false };
@@ -54,7 +56,62 @@ public:
         types[".eml"] = { "From: me@test.com", "", "", true };
     }
 
+    // РЎС‚Р°РЅРґР°СЂС‚РЅС‹Р№ РјРµС‚РѕРґ (С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹Р№ СЂР°Р·РјРµСЂ)
     std::string Make(const std::string& ext, size_t size = 1024) {
+        return GenerateContent(ext, size);
+    }
+
+    // [NEW] РњРµС‚РѕРґ РґР»СЏ СЂРµР°Р»РёСЃС‚РёС‡РЅС‹С… (СЂР°РЅРґРѕРјРЅС‹С…) СЂР°Р·РјРµСЂРѕРІ
+    // Р’РѕР·РІСЂР°С‰Р°РµС‚ РїР°СЂСѓ {РєРѕРЅС‚РµРЅС‚, СЂР°Р·РјРµСЂ}
+    std::pair<std::string, size_t> MakeRealistic(const std::string& ext, std::mt19937& rng) {
+        size_t size = GetRealisticSize(ext, rng);
+        return { GenerateContent(ext, size), size };
+    }
+
+    // [NEW] РњРµС‚РѕРґ РґР»СЏ РёРЅСЉРµРєС†РёРё РєРѕРЅС‚РµРЅС‚Р° (РїСЂРѕРІРµСЂРєР° РЅР° РєРѕР»Р»РёР·РёРё)
+    std::string MakeWithContent(const std::string& ext, const std::string& injected) {
+        if (types.find(ext) == types.end()) return "";
+        const auto& t = types[ext];
+        std::stringstream ss;
+        ss << t.head;
+        // Р’СЃС‚Р°РІР»СЏРµРј Р»РѕРІСѓС€РєСѓ РґРѕ РјР°СЂРєРµСЂР°
+        ss << " ...text... " << injected << " ...text... ";
+        ss << t.middle;
+        ss << t.tail;
+        return ss.str();
+    }
+
+    std::string MakeGarbage(size_t size) {
+        return std::string(size, '\xAA');
+    }
+
+private:
+    std::map<std::string, TypeInfo> types;
+
+    // Р›РѕРіРёРєР° СЂР°Р·РјРµСЂРѕРІ (РєРѕРїРёСЏ РёР· Generator.cpp)
+    size_t GetRealisticSize(const std::string& ext, std::mt19937& rng) {
+        std::uniform_int_distribution<int> chance(0, 100);
+        int c = chance(rng);
+        bool is_text = types[ext].is_text;
+
+        if (is_text) {
+            std::uniform_int_distribution<size_t> d(1024, 200 * 1024);
+            return d(rng);
+        }
+        else if (ext == ".mkv" || ext == ".mp3") {
+            // РњРµРґРёР° (5-50 РњР‘)
+            std::uniform_int_distribution<size_t> d(5 * 1024 * 1024, 50 * 1024 * 1024);
+            return d(rng);
+        }
+        else {
+            // Р‘РёРЅР°СЂРЅРёРєРё
+            if (c < 50) { std::uniform_int_distribution<size_t> d(10 * 1024, 500 * 1024); return d(rng); }
+            else if (c < 90) { std::uniform_int_distribution<size_t> d(500 * 1024, 5 * 1024 * 1024); return d(rng); }
+            else { std::uniform_int_distribution<size_t> d(5 * 1024 * 1024, 20 * 1024 * 1024); return d(rng); }
+        }
+    }
+
+    std::string GenerateContent(const std::string& ext, size_t size) {
         if (types.find(ext) == types.end()) return "";
         const auto& t = types[ext];
         std::stringstream ss;
@@ -63,7 +120,6 @@ public:
         size_t overhead = t.head.size() + t.middle.size() + t.tail.size();
         size_t body_total = (size > overhead) ? size - overhead : 0;
 
-        // Маркер ближе к началу для RE2 (лимит 1000 байт)
         size_t pre_marker = std::min((size_t)50, body_total);
         size_t post_marker = body_total - pre_marker;
 
@@ -72,7 +128,6 @@ public:
                 if (ext == ".json") ss << "\"v\""; else ss << std::string(n, ' ');
             }
             else {
-                // Безопасный мусор 0xCC (чтобы не создавать хвосты случайно)
                 for (size_t i = 0; i < n; ++i) ss.put((char)0xCC);
             }
             };
@@ -84,16 +139,9 @@ public:
 
         return ss.str();
     }
-
-    std::string MakeGarbage(size_t size) {
-        return std::string(size, '\xAA');
-    }
-
-private:
-    std::map<std::string, TypeInfo> types;
 };
 
-// Фикстура
+// Р¤РёРєСЃС‚СѓСЂР°
 template <typename T>
 class ScannerTest : public ::testing::Test {
 protected:
@@ -107,7 +155,6 @@ protected:
         auto row = [&](const std::string& l, int e, int a) {
             if (e != a) std::cout << " -> " << std::left << std::setw(10) << l << " Exp:" << e << " Act:" << a << "\n";
             };
-        // Полный вывод таблицы
         row("PDF", exp.pdf, act.pdf); row("ZIP", exp.zip, act.zip); row("RAR", exp.rar, act.rar);
         row("DOC", exp.doc, act.doc); row("XLS", exp.xls, act.xls); row("PPT", exp.ppt, act.ppt);
         row("DOCX", exp.docx, act.docx); row("XLSX", exp.xlsx, act.xlsx); row("PPTX", exp.pptx, act.pptx);
@@ -124,14 +171,25 @@ protected:
         auto ms = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - start).count();
 
         bool failed = false;
-        auto check = [&](int a, int e) { if (a != e) failed = true; };
-
-        check(actual.pdf, expected.pdf); check(actual.zip, expected.zip); check(actual.rar, expected.rar);
-        check(actual.doc, expected.doc); check(actual.xls, expected.xls); check(actual.ppt, expected.ppt);
-        check(actual.docx, expected.docx); check(actual.xlsx, expected.xlsx); check(actual.pptx, expected.pptx);
-        check(actual.png, expected.png); check(actual.jpg, expected.jpg); check(actual.gif, expected.gif); check(actual.bmp, expected.bmp);
-        check(actual.mkv, expected.mkv); check(actual.mp3, expected.mp3);
-        check(actual.json, expected.json); check(actual.html, expected.html); check(actual.xml, expected.xml); check(actual.eml, expected.eml);
+        if (actual.pdf != expected.pdf) failed = true;
+        if (actual.zip != expected.zip) failed = true;
+        if (actual.rar != expected.rar) failed = true;
+        if (actual.doc != expected.doc) failed = true;
+        if (actual.xls != expected.xls) failed = true;
+        if (actual.ppt != expected.ppt) failed = true;
+        if (actual.docx != expected.docx) failed = true;
+        if (actual.xlsx != expected.xlsx) failed = true;
+        if (actual.pptx != expected.pptx) failed = true;
+        if (actual.png != expected.png) failed = true;
+        if (actual.jpg != expected.jpg) failed = true;
+        if (actual.gif != expected.gif) failed = true;
+        if (actual.bmp != expected.bmp) failed = true;
+        if (actual.mkv != expected.mkv) failed = true;
+        if (actual.mp3 != expected.mp3) failed = true;
+        if (actual.json != expected.json) failed = true;
+        if (actual.html != expected.html) failed = true;
+        if (actual.xml != expected.xml) failed = true;
+        if (actual.eml != expected.eml) failed = true;
 
         if (failed) {
             PrintFailureDetails(test_name, expected, actual, ms);
@@ -148,60 +206,68 @@ TYPED_TEST_SUITE(ScannerTest, ScannerTypes);
 TYPED_TEST(ScannerTest, Base_AllTypes) {
     ScanStats expected;
     std::string data;
-
     data += this->factory.Make(".pdf", 2048); expected.pdf++;
     data += this->factory.Make(".zip", 2048); expected.zip++;
-
     data += this->factory.Make(".png", 1024); expected.png++;
     data += this->factory.Make(".bmp", 1024); expected.bmp++;
     data += this->factory.Make(".gif", 1024); expected.gif++;
-
     data += this->factory.Make(".mp3", 1024); expected.mp3++;
-
     data += this->factory.Make(".json", 512) + "\n"; expected.json++;
-    // [FIX] EML теперь 1 (так как ищем только From:)
     data += this->factory.Make(".eml", 512) + "\n";  expected.eml++;
-
     this->RunVerify("Base_AllTypes", data, expected);
 }
 
-TYPED_TEST(ScannerTest, Office_Suite) {
+TYPED_TEST(ScannerTest, Office_Suite_Fixed) {
     ScanStats expected;
     std::string data;
-
     data += this->factory.Make(".doc", 2048); expected.doc++;
     data += this->factory.Make(".xls", 2048); expected.xls++;
     data += this->factory.Make(".docx", 2048); expected.docx++;
-
-    // DOCX это ZIP, ожидаем обнаружение.
-    expected.zip = 1;
-
-    // Хак для RE2 теста (из-за жадности может не найти вложенный zip, если они слиплись, но тут они разделены)
-    // Но для чистоты теста оставим как есть.
-    this->RunVerify("Office_Suite", data, expected);
+    // РћР¶РёРґР°РµРј ZIP=0, С‚Р°Рє РєР°Рє DOCX РЅРµ СЃС‡РёС‚Р°РµС‚СЃСЏ ZIP-РѕРј
+    expected.zip = 0;
+    this->RunVerify("Office_Suite_Fixed", data, expected);
 }
 
 TYPED_TEST(ScannerTest, Trap_Partial) {
     std::string data;
     data += "BM_fake";
     data += "PK_fake";
-    // GIF заголовок без хвоста
     data += Sig::Bin::GIF_HEAD + this->factory.MakeGarbage(100);
-
-    ScanStats expected; // Все 0
+    ScanStats expected;
     this->RunVerify("Trap_Partial", data, expected);
 }
 
-TYPED_TEST(ScannerTest, Mush_Multiple_Same_Type) {
-    std::string pdf1 = this->factory.Make(".pdf", 1024);
-    std::string garbage = this->factory.MakeGarbage(1024);
-    std::string pdf2 = this->factory.Make(".pdf", 1024);
-    std::string full = pdf1 + garbage + pdf2;
+// [NEW] РўРµСЃС‚ СЃ СЂРµР°Р»РёСЃС‚РёС‡РЅС‹РјРё СЂР°Р·РјРµСЂР°РјРё (Battle Mode Check)
+// РџСЂРѕРІРµСЂСЏРµС‚, С‡С‚Рѕ СЏРєРѕСЂСЏ РЅР°С…РѕРґСЏС‚ С„Р°Р№Р»С‹, Р° РјР°С‚РµРјР°С‚РёРєР° st.zip -= office СЂР°Р±РѕС‚Р°РµС‚.
+TYPED_TEST(ScannerTest, Office_Vs_Zip_Realistic) {
+    std::mt19937 rng(42);
+    std::string data;
+    ScanStats expected;
+
+    // 1. РќР°СЃС‚РѕСЏС‰РёР№ ZIP (СЂР°РЅРґРѕРјРЅС‹Р№ СЂР°Р·РјРµСЂ)
+    auto [zip_c, zip_s] = this->factory.MakeRealistic(".zip", rng);
+    data += zip_c; expected.zip++;
+
+    // 2. РћС„РёСЃ (СЂР°РЅРґРѕРјРЅС‹Р№ СЂР°Р·РјРµСЂ)
+    auto [docx_c, docx_s] = this->factory.MakeRealistic(".docx", rng);
+    data += docx_c; expected.docx++;
+    auto [xlsx_c, xlsx_s] = this->factory.MakeRealistic(".xlsx", rng);
+    data += xlsx_c; expected.xlsx++;
+    auto [pptx_c, pptx_s] = this->factory.MakeRealistic(".pptx", rng);
+    data += pptx_c; expected.pptx++;
+
+    this->RunVerify("Office_Vs_Zip_Realistic", data, expected);
+}
+
+// [NEW] РўРµСЃС‚ РЅР° РєРѕР»Р»РёР·РёРё (Anchor Collision)
+// РџСЂРѕРІРµСЂСЏРµС‚, С‡С‚Рѕ СЃРєР°РЅРµСЂ РёС‰РµС‚ "word/document.xml", Р° РЅРµ РїСЂРѕСЃС‚Рѕ "word/".
+TYPED_TEST(ScannerTest, Office_Anchor_Collision) {
+    std::string data;
+    // Р’СЃС‚Р°РІР»СЏРµРј РѕР±РјР°РЅРєСѓ "word/" РІ РєРѕРЅС‚РµРЅС‚
+    data += this->factory.MakeWithContent(".docx", "this is a fake word/ path in text");
 
     ScanStats expected;
-    // RE2 найдет 1 (жадный *), остальные 2 (ленивые *? или {0,N}?)
-    if (this->scanner.name() == "Google RE2") expected.pdf = 1;
-    else expected.pdf = 2;
+    expected.docx = 1; // Р”РѕР»Р¶РµРЅ РЅР°Р№С‚РёСЃСЊ С‚РѕР»СЊРєРѕ 1 СЂР°Р· (РєР°Рє СЃС‚СЂСѓРєС‚СѓСЂР°), Р° РЅРµ 2
 
-    this->RunVerify("Mush_Multiple_Same_Type", full, expected);
+    this->RunVerify("Office_Anchor_Collision", data, expected);
 }

@@ -95,6 +95,7 @@ public:
 class StdScanner : public Scanner {
 public:
     StdScanner();
+    ~StdScanner() override;
     std::string name() const override;
     void scan(const char* data, size_t size, ScanStats& stats) override;
 
@@ -117,7 +118,7 @@ public:
 
 private:
     // Используем unique_ptr, чтобы не инклюдить re2.h в хедер
-    std::unique_ptr<re2::RE2> r_pdf, r_zip_gen;
+    std::unique_ptr<re2::RE2> r_pdf, r_zip;
     std::unique_ptr<re2::RE2> r_rar4, r_rar5;
     std::unique_ptr<re2::RE2> r_png, r_jpg, r_gif, r_bmp;
     std::unique_ptr<re2::RE2> r_mkv, r_mp3;
@@ -130,11 +131,12 @@ private:
 class BoostScanner : public Scanner {
 public:
     BoostScanner();
+    ~BoostScanner() override;
     std::string name() const override;
     void scan(const char* data, size_t size, ScanStats& stats) override;
 
 private:
-    boost::regex r_pdf, r_zip_gen;
+    boost::regex r_pdf, r_zip;
     boost::regex r_rar4, r_rar5;
     boost::regex r_png, r_jpg, r_gif, r_bmp;
     boost::regex r_mkv, r_mp3;
