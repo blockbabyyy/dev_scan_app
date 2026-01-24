@@ -3,6 +3,7 @@
 #include <string_view>
 #include <iostream>
 #include <exception>
+#include <algorithm> 
 
 #include "Scaner.h"
 #include "Signatures.h" 
@@ -75,6 +76,17 @@ int count_re2(const char* data, size_t size, re2::RE2* re) {
     re2::StringPiece input(data, size);
     while (re2::RE2::FindAndConsume(&input, *re)) count++;
     return count;
+}
+
+inline bool pre_check(const char* data, size_t size, const std::string& head, const std::string& tail = "") {
+    if (head.empty()) return true;
+    std::string_view sv(data, size);
+    size_t head_pos = sv.find(head);
+    if (head_pos == std::string_view::npos) return false;
+    if (!tail.empty()) {
+        if (sv.find(tail, head_pos + 1) == std::string_view::npos) return false;
+    }
+    return true;
 }
 
 // ==========================================
@@ -189,35 +201,7 @@ void StdScanner::scan(const char* d, size_t s, ScanStats& st) {
     // Очистка строки статуса после завершения
     std::cout << "\r[StdScanner] Done.                                           \n";
 }
-/*
-void StdScanner::scan(const char* d, size_t s, ScanStats& st) {
-    auto searcher = [](const char* start, const char* end, std::cmatch& m, const std::regex& re) { return std::regex_search(start, end, m, re); };
-    if (has_sig(d, s, Sig::Bin::OLE)) {
-        st.doc += count_matches_std(d, s, r_doc, searcher);
-        st.xls += count_matches_std(d, s, r_xls, searcher);
-        st.ppt += count_matches_std(d, s, r_ppt, searcher);
-    }
-    if (has_sig(d, s, Sig::Bin::ZIP_HEAD)) {
-        st.docx += count_matches_std(d, s, r_docx, searcher);
-        st.xlsx += count_matches_std(d, s, r_xlsx, searcher);
-        st.pptx += count_matches_std(d, s, r_pptx, searcher);
-        st.zip += count_matches_std(d, s, r_zip, searcher);
-    }
-    if (has_sig(d, s, Sig::Bin::PDF_HEAD)) st.pdf += count_matches_std(d, s, r_pdf, searcher);
-    if (has_sig(d, s, Sig::Bin::RAR4)) st.rar += count_matches_std(d, s, r_rar4, searcher);
-    if (has_sig(d, s, Sig::Bin::RAR5)) st.rar += count_matches_std(d, s, r_rar5, searcher);
-    if (has_sig(d, s, Sig::Bin::PNG_HEAD)) st.png += count_matches_std(d, s, r_png, searcher);
-    if (has_sig(d, s, Sig::Bin::JPG_HEAD)) st.jpg += count_matches_std(d, s, r_jpg, searcher);
-    if (has_sig(d, s, Sig::Bin::GIF_HEAD)) st.gif += count_matches_std(d, s, r_gif, searcher);
-    st.bmp += count_matches_std(d, s, r_bmp, searcher);
-    if (has_sig(d, s, Sig::Bin::MKV)) st.mkv += count_matches_std(d, s, r_mkv, searcher);
-    if (has_sig(d, s, Sig::Bin::MP3)) st.mp3 += count_matches_std(d, s, r_mp3, searcher);
-    st.html += count_matches_std(d, s, r_html, searcher);
-    st.xml += count_matches_std(d, s, r_xml, searcher);
-    st.json += count_matches_std(d, s, r_json, searcher);
-    st.eml += count_matches_std(d, s, r_eml, searcher);
-}
-*/
+
 // ==========================================
 // Re2Scanner
 // ==========================================
@@ -263,8 +247,11 @@ Re2Scanner::Re2Scanner() {
     r_json = compile(Sig::framed_text<Sig::Engine::RE2>(Sig::Text::JSON_HEAD, Sig::Text::JSON_TAIL), ob, "JSON");
     r_eml = compile(Sig::Text::EML, ot, "EML");
 }
+
 Re2Scanner::~Re2Scanner() = default;
+
 std::string Re2Scanner::name() const { return "Google RE2"; }
+
 void Re2Scanner::scan(const char* d, size_t s, ScanStats& st) {
     if (has_sig(d, s, Sig::Bin::OLE)) {
         st.doc += count_re2(d, s, r_doc.get());
@@ -327,7 +314,9 @@ BoostScanner::BoostScanner() {
     safe_compile(r_json, Sig::framed_text<Sig::Engine::BOOST>(Sig::Text::JSON_HEAD, Sig::Text::JSON_TAIL), flags_bin, "JSON");
     safe_compile(r_eml, Sig::Text::EML, flags_text, "EML");
 }
+
 std::string BoostScanner::name() const { return "Boost.Regex"; }
+
 void BoostScanner::scan(const char* d, size_t s, ScanStats& st) {
     auto searcher = [](const char* start, const char* end, boost::cmatch& m, const boost::regex& re) { return boost::regex_search(start, end, m, re); };
     if (has_sig(d, s, Sig::Bin::OLE)) {
@@ -360,7 +349,7 @@ void BoostScanner::scan(const char* d, size_t s, ScanStats& st) {
 // HsScanner
 // ==========================================
 HsScanner::HsScanner() {
-    // [FIX] Используем Engine::HS
+    // Сигнатуры
     std::string p_doc = Sig::complex<Sig::Engine::HS>(Sig::Bin::OLE, Sig::Bin::OLE_WORD);
     std::string p_xls = Sig::complex<Sig::Engine::HS>(Sig::Bin::OLE, Sig::Bin::OLE_XL);
     std::string p_ppt = Sig::complex<Sig::Engine::HS>(Sig::Bin::OLE, Sig::Bin::OLE_PPT);
@@ -379,6 +368,7 @@ HsScanner::HsScanner() {
     std::string p_bmp = Sig::Bin::BMP_HEAD;
     std::string p_mkv = Sig::raw_to_hex(Sig::Bin::MKV);
     std::string p_mp3 = Sig::raw_to_hex(Sig::Bin::MP3);
+
     std::string p_html = Sig::framed_text<Sig::Engine::HS>(Sig::Text::HTML_HEAD, Sig::Text::HTML_TAIL);
     std::string p_xml = Sig::Text::XML;
     std::string p_json = Sig::framed_text<Sig::Engine::HS>(Sig::Text::JSON_HEAD, Sig::Text::JSON_TAIL);
@@ -400,11 +390,12 @@ HsScanner::HsScanner() {
     };
 
     std::vector<unsigned int> flags;
+    // Используем DOTALL для бинарных данных
     for (int i = 0; i < 16; ++i) flags.push_back(HS_FLAG_DOTALL);
-    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8);
-    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8);
-    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_UTF8);
-    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8);
+    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8); // HTML
+    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8); // XML
+    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_UTF8);                    // JSON
+    flags.push_back(HS_FLAG_DOTALL | HS_FLAG_CASELESS | HS_FLAG_UTF8); // EML
 
     hs_compile_error_t* err;
     if (hs_compile_multi(exprs, flags.data(), ids, 20, HS_MODE_BLOCK, nullptr, &db, &err) != HS_SUCCESS) {
@@ -412,13 +403,52 @@ HsScanner::HsScanner() {
         hs_free_compile_error(err);
     }
 }
-HsScanner::~HsScanner() { if (scratch) hs_free_scratch(scratch); if (db) hs_free_database(db); }
-void HsScanner::prepare() { if (db && !scratch) hs_alloc_scratch(db, &scratch); }
+
+HsScanner::~HsScanner() {
+    if (scratch) hs_free_scratch(scratch);
+    if (db) hs_free_database(db);
+}
+
+void HsScanner::prepare() {
+    if (db && !scratch) hs_alloc_scratch(db, &scratch);
+}
+
 std::string HsScanner::name() const { return "Hyperscan"; }
+
+// Контекст для хранения состояния между вызовами (защита от дребезга)
+struct HsContext {
+    ScanStats* stats;
+    unsigned long long last_offset[32] = { 0 }; // Смещение последнего совпадения для каждого id
+};
+
 void HsScanner::scan(const char* data, size_t size, ScanStats& stats) {
     if (!db || !scratch) return;
-    auto on_match = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* ctx) -> int {
-        ScanStats* st = static_cast<ScanStats*>(ctx);
+
+    HsContext ctx;
+    ctx.stats = &stats;
+
+
+    auto on_match = [](unsigned int id, unsigned long long from, unsigned long long to, unsigned int flags, void* ptr) -> int {
+        HsContext* c = static_cast<HsContext*>(ptr);
+
+        // DEBOUNCE LOGIC (Защита от дребезга)
+        // Если для этого ID новое совпадение найдено слишком близко к предыдущему (например, < 512 байт),
+        // считаем это частью того же файла и игнорируем.
+        // Это позволяет считать поток файлов (BIN/ZIP), но подавляет множественные срабатывания внутри одного файла.
+
+        // 0 - особый случай (начало), но to всегда > 0.
+        // Используем 512 байт как "мертвую зону". В генераторе файлы > 1KB.
+        if (id < 32) {
+            unsigned long long last = c->last_offset[id];
+
+            // Если это не первое совпадение И дистанция меньше порога -> пропускаем
+            if (last != 0 && to < last + 512) {
+                return 0;
+            }
+            c->last_offset[id] = to; // Обновляем позицию
+        }
+
+        ScanStats* st = c->stats;
         switch (id) {
         case ID_DOC: st->doc++; break; case ID_XLS: st->xls++; break; case ID_PPT: st->ppt++; break;
         case ID_DOCX: st->docx++; break; case ID_XLSX: st->xlsx++; break; case ID_PPTX: st->pptx++; break;
@@ -430,5 +460,6 @@ void HsScanner::scan(const char* data, size_t size, ScanStats& stats) {
         }
         return 0;
         };
-    hs_scan(db, data, size, 0, scratch, on_match, &stats);
+
+    hs_scan(db, data, size, 0, scratch, on_match, &ctx);
 }
