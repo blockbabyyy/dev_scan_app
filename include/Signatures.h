@@ -58,6 +58,7 @@ namespace Sig {
     }
 
     const std::string ANY = "[\\s\\S]";
+    // [FIX] Увеличили лимит до 60 МБ, чтобы находить файлы >10 МБ (как file_7.jpg из лога)
     const std::string LIMIT_STD = "{0,60000000}";
 
     // --- ЛОГИКА ГЕНЕРАЦИИ ---
@@ -72,7 +73,7 @@ namespace Sig {
         if (head_raw == Bin::OLE) {
             std::string mid;
             if constexpr (E == Engine::RE2) mid = ".*?";
-            else mid = ANY + "{0,1000}"; // Уменьшаем лимит OLE для надежности
+            else mid = ANY + "{0,50000}";
 
             return raw_to_hex(head_raw) + mid + raw_to_hex(marker_raw);
         }
@@ -83,17 +84,12 @@ namespace Sig {
 
     template <Engine E>
     std::string framed(const std::string& head_raw, const std::string& tail_raw) {
-        // [FIX] Спасение std::regex
-        // Для бинарных файлов (PNG, JPG, PDF, ZIP) в режиме STD 
-        // мы ищем ТОЛЬКО ЗАГОЛОВОК (или хвост). 
-        // Поиск диапазона .* на файлах > 1 МБ убивает std::regex.
-        if constexpr (E == Engine::STD) {
-            // Для ZIP - хвост (EOCD), так надежнее
-            if (head_raw == Bin::ZIP_HEAD) return raw_to_hex(tail_raw);
+        // [FIX] Убрали опасную оптимизацию "только заголовок" для STD.
+        // Возвращаем полноценную проверку (Head...Tail).
 
-            // Для остальных (PDF, PNG, JPG) - заголовок
-            // Это превращает поиск в простой скан сигнатуры, что работает молниеносно.
-            return raw_to_hex(head_raw);
+        // Единственное исключение - ZIP EOCD, так как это хвост и он уникален.
+        if (head_raw == Bin::ZIP_HEAD && E != Engine::HS) {
+            return raw_to_hex(tail_raw);
         }
 
         std::string head = raw_to_hex(head_raw);
@@ -106,15 +102,14 @@ namespace Sig {
             return head + ".*?" + tail;
         }
         else {
-            // Boost пусть мучается с диапазоном (он чуть крепче), 
-            // но тоже может упасть. Если упадет - переведем и его на head-only.
+            // STD / BOOST
+            // Используем лимит 60МБ. Это может быть медленно, но это корректно.
             return head + ANY + LIMIT_STD + "?" + tail;
         }
     }
 
     template <Engine E>
     std::string framed_text(const std::string& head, const std::string& tail) {
-        // Текст оставляем как есть (обычно файлы меньше)
         if constexpr (E == Engine::HS) return head + ".*?" + tail;
         else if constexpr (E == Engine::RE2) return head + ".*?" + tail;
         else return head + ANY + LIMIT_STD + "?" + tail;
