@@ -1,141 +1,99 @@
 cmake_minimum_required(VERSION 3.21)
 
-# ==============================================================================
-# 1. НАСТРОЙКИ VCPKG
-# ==============================================================================
-# Убираем надоедливый варнинг про FindBoost
+# === 1. VCPKG PREAMBLE ===
 if(POLICY CMP0167)
     cmake_policy(SET CMP0167 OLD)
 endif()
 
-set(VCPKG_ROOT "C:/vcpkg" CACHE STRING "Путь до vcpkg" FORCE)
-set(VCPKG_DEFAULT_TRIPLET "x64-windows" CACHE STRING "Архитектура по дефолту" FORCE)
+# Настройки VCPKG
+set(VCPKG_ROOT "C:/vcpkg" CACHE STRING "Path to vcpkg root")
+set(VCPKG_DEFAULT_TRIPLET "x64-windows" CACHE STRING "Target triplet")
 
-# Подключаем тулчейн vcpkg, если он еще не задан
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
-    set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
-        CACHE STRING "Vcpkg toolchain" FORCE)
+    set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
 endif()
 
-# ==============================================================================
-# 2. ПРОЕКТ
-# ==============================================================================
-project(RegexBench)
+project(DevScan)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ==============================================================================
-# 3. ПОИСК БИБЛИОТЕК
-# ==============================================================================
+# === 2. ЗАВИСИМОСТИ ===
+find_package(re2 CONFIG REQUIRED)
+find_package(Boost REQUIRED COMPONENTS regex iostreams)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(Threads REQUIRED)
+find_package(GTest CONFIG REQUIRED) # Добавили GTest
 
-# --- Hyperscan (Тут пришлось повозиться) ---
-# Hyperscan ставится кривовато в vcpkg (нет нормального конфига), ищем вручную.
-find_path(HYPERSCAN_INCLUDE_DIR
-    NAMES hs/hs.h
-    # Сначала смотрим в локальной папке билда (если манифест режим)
+# Hyperscan (ручной поиск)
+find_path(HYPERSCAN_INCLUDE_DIR NAMES hs/hs.h
     PATHS "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_DEFAULT_TRIPLET}/include"
-    # На всякий случай смотрим в глобальной папке vcpkg
-    "${VCPKG_ROOT}/installed/${VCPKG_DEFAULT_TRIPLET}/include"
+          "${VCPKG_ROOT}/installed/${VCPKG_DEFAULT_TRIPLET}/include"
     NO_DEFAULT_PATH
 )
-
-find_library(HYPERSCAN_LIBRARY
-    NAMES hs
+find_library(HYPERSCAN_LIBRARY NAMES hs
     PATHS "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_DEFAULT_TRIPLET}/lib"
-    "${VCPKG_ROOT}/installed/${VCPKG_DEFAULT_TRIPLET}/lib"
+          "${VCPKG_ROOT}/installed/${VCPKG_DEFAULT_TRIPLET}/lib"
     NO_DEFAULT_PATH
 )
 
 if(NOT HYPERSCAN_INCLUDE_DIR OR NOT HYPERSCAN_LIBRARY)
-    message(FATAL_ERROR "Hyperscan не нашелся! Проверь пути в CMakeLists.")
+    message(FATAL_ERROR "Hyperscan library not found!")
 endif()
 
-# --- Остальное ищется нормально через конфиги ---
-find_package(absl CONFIG REQUIRED)
-find_package(re2 CONFIG REQUIRED)
-find_package(Boost REQUIRED COMPONENTS regex)
-find_package(benchmark CONFIG REQUIRED)
-find_package(GTest CONFIG REQUIRED)
+# === 3. БИБЛИОТЕКА (CORE) ===
+add_library(DevScanCore STATIC
+    src/Scaner.cpp
+)
 
+target_include_directories(DevScanCore PUBLIC 
+    "${CMAKE_SOURCE_DIR}/include"
+)
+target_include_directories(DevScanCore PRIVATE 
+    "${HYPERSCAN_INCLUDE_DIR}"
+)
+
+target_link_libraries(DevScanCore PUBLIC
+    re2::re2
+    Boost::regex
+    nlohmann_json::nlohmann_json
+    ${HYPERSCAN_LIBRARY}
+)
+
+# === 4. ПРИЛОЖЕНИЕ (CLI) ===
+add_executable(DevScanApp src/cli/main_cli.cpp)
+
+target_link_libraries(DevScanApp PRIVATE
+    DevScanCore
+    Boost::iostreams
+    Threads::Threads
+)
+
+configure_file(signatures.json signatures.json COPYONLY)
+
+# === 5. ТЕСТЫ (TESTS) ===
 enable_testing()
 
-# ==============================================================================
-# 4. ФАЙЛЫ
-# ==============================================================================
-
-set(SOURCES
-    main.cpp
-    src/generator/Generator.cpp
-    src/Scaner.cpp
-)
-
-set(HEADERS
-    include/generator/Generator.h
-    include/Signatures.h
-    include/Scaner.h
-)
-
-# ==============================================================================
-# 5. СБОРКА
-# ==============================================================================
-
-# Основная программа
-add_executable(RegexBench ${SOURCES} ${HEADERS})
-
-target_include_directories(RegexBench PRIVATE
-    "${CMAKE_SOURCE_DIR}/include"
-    "${HYPERSCAN_INCLUDE_DIR}"
-)
-
-target_link_libraries(RegexBench PRIVATE
-    re2::re2
-    Boost::regex
-    benchmark::benchmark
-    benchmark::benchmark_main
-    ${HYPERSCAN_LIBRARY}
-    Psapi
-    absl::base
-)
-
-# --- Тесты ---
-add_executable(RegexBenchTests
+add_executable(DevScanTests
     tests/ScanerTests.cpp
-    src/Scaner.cpp
-    src/generator/Generator.cpp
+    tests/IntegrationTests.cpp     
+    src/generator/Generator.cpp    
 )
 
-target_include_directories(RegexBenchTests PRIVATE
+# Подключаем заголовки ядра
+target_include_directories(DevScanTests PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
-    "${HYPERSCAN_INCLUDE_DIR}"
+    "${CMAKE_SOURCE_DIR}/include/generator"
 )
 
-target_link_libraries(RegexBenchTests PRIVATE
-    re2::re2
-    Boost::regex
-    ${HYPERSCAN_LIBRARY}
+# Линкуем с ядром и GTest
+target_link_libraries(DevScanTests PRIVATE
+    DevScanCore
     GTest::gtest
-    GTest::gtest_main 
+    GTest::gtest_main
+    Boost::iostreams
 )
 
+# Регистрация тестов в CTest
 include(GoogleTest)
-gtest_discover_tests(RegexBenchTests)
-
-
-add_executable(Benchmarks tests/Benchmarks.cpp src/Scaner.cpp src/generator/Generator.cpp)
-# Подключаем папки include
-target_include_directories(Benchmarks PRIVATE 
-    ${CMAKE_SOURCE_DIR}/include 
-    ${CMAKE_SOURCE_DIR}/src
-)
-
-# Линкуем библиотеки (те же, что и для main app)
-target_link_libraries(Benchmarks PRIVATE
-    re2::re2
-    Boost::regex
-    benchmark::benchmark
-    benchmark::benchmark_main
-    ${HYPERSCAN_LIBRARY}
-    Psapi
-    absl::base
-)
+gtest_discover_tests(DevScanTests)

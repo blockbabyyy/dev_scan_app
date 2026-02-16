@@ -1,5 +1,4 @@
 ﻿#include "generator/Generator.h"
-#include "Signatures.h"
 #include <iostream>
 #include <sstream>
 #include <random>
@@ -22,45 +21,74 @@ void init_crc32() {
     crc_initialized = true;
 }
 
-// [FIX] Ловушки теперь "битые" , чтобы не вызывать False Positives
+// Ловушки
 const std::vector<std::string> TRAPS_BIN = {
-    "\x50\x4B\xFF\xFF",     // PK.. - похоже на ZIP, но не ZIP
-    "\x25\x50\x44\x5F",     // %PD_ (невалидный заголвок ПДФ)
-    "\x47\x49\x46\x39",     // GIF9 (а не GIF8)
-    "\xFF\xD8\x00\x00",     // JPG Marker prefix without valid subtype
-    "WordDoc_ment",         // [FIX] Опепчатка в "WordDocument"
-    "Workbuuk",             // Опечатка в  Excel
-    "PowerPoint Fakument"   // Опечатка PPT
+    "\x50\x4B\xFF\xFF",     // Fake ZIP
+    "\x25\x50\x44\x5F",     // Fake PDF
+    "\x47\x49\x46\x39",     // Fake GIF
+    "\xFF\xD8\x00\x00",     // Fake JPG
+    "WordDoc_ment",
+    "Workbuuk",
+    "PowerPoint Fakument"
 };
 
 const std::vector<std::string> TRAPS_TEXT = {
-    "<hmtl fake='yes'>",    // [FIX] Опечатка в теге 
-    "{\"fake_json\"; 1}",   // [FIX] Точка с запятой вместо двоеточия
-    "Subject- Fake",        // [FIX] Тире вместо двоеточия
-    "%PDF-1.4-fake",        // Мусор в вресии
-	"PK\x03\x04_fake_text", // Похожа на ZIP в тексте
-	"GIF89a_fake"           // Похожа на GIF в тексте
+    "<hmtl fake='yes'>",
+    "{\"fake_json\"; 1}",
+    "Subject- Fake",
+    "%PDF-1.4-fake",
+    "PK\x03\x04_fake_text",
+    "GIF89a_fake"
 };
+
+// Константы сигнатур (так как Signatures.h удален)
+namespace Sig {
+    const std::string ZIP_HEAD = "\x50\x4B\x03\x04";
+    const std::string ZIP_TAIL = "\x50\x4B\x05\x06";
+    // [FIX] Explicit length to preserve trailing \x00 byte
+    const std::string RAR4("\x52\x61\x72\x21\x1A\x07\x00", 7);
+    const std::string PNG_HEAD = "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A";
+    const std::string PNG_TAIL = "\x49\x45\x4E\x44\xAE\x42\x60\x82";
+    const std::string JPG_HEAD = "\xFF\xD8\xFF";
+    const std::string JPG_TAIL = "\xFF\xD9";
+    const std::string GIF_HEAD = "\x47\x49\x46\x38"; // GIF8
+    const std::string PDF_HEAD = "\x25\x50\x44\x46"; // %PDF
+    const std::string PDF_TAIL = "\x25\x25\x45\x4F\x46"; // %%EOF
+    const std::string MP3 = "\x49\x44\x33"; // ID3
+    const std::string MKV = "\x1A\x45\xDF\xA3";
+    const std::string OLE = "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1";
+    // [FIX] Use text stream names matching the scanner signatures
+    const std::string OLE_WORD = "WordDocument";
+    const std::string OLE_XL = "Workbook";
+    const std::string OLE_PPT = "PowerPoint Document";
+
+    // XML based
+    const std::string XML_WORD = "word/document.xml";
+    const std::string XML_XL = "xl/workbook.xml";
+    const std::string XML_PPT = "ppt/presentation.xml";
+}
 
 DataSetGenerator::DataSetGenerator() {
     init_crc32();
 
-    // Инициализация типов 
-    types[".zip"] = { ".zip", Sig::Bin::ZIP_HEAD, "", Sig::Bin::ZIP_TAIL, false };
-    types[".rar"] = { ".rar", Sig::Bin::RAR4, "", "", false };
-    types[".png"] = { ".png", Sig::Bin::PNG_HEAD, "", Sig::Bin::PNG_TAIL, false };
-    types[".jpg"] = { ".jpg", Sig::Bin::JPG_HEAD, "", Sig::Bin::JPG_TAIL, false };
-    types[".gif"] = { ".gif", Sig::Bin::GIF_HEAD, "", std::string("\x00\x3B", 2), false };
+    types[".zip"] = { ".zip", Sig::ZIP_HEAD, "", Sig::ZIP_TAIL, false };
+    types[".rar"] = { ".rar", Sig::RAR4, "", "", false };
+    types[".png"] = { ".png", Sig::PNG_HEAD, "", Sig::PNG_TAIL, false };
+    types[".jpg"] = { ".jpg", Sig::JPG_HEAD, "", Sig::JPG_TAIL, false };
+    types[".gif"] = { ".gif", Sig::GIF_HEAD, "", std::string("\x00\x3B", 2), false };
     types[".bmp"] = { ".bmp", std::string("\x42\x4D\x36\x00\x0C\x00\x00\x00", 8), "", "", false };
-    types[".mkv"] = { ".mkv", Sig::Bin::MKV, "", "", false };
-    types[".mp3"] = { ".mp3", Sig::Bin::MP3, "", "", false };
-    types[".doc"] = { ".doc", Sig::Bin::OLE, Sig::Bin::OLE_WORD, "", false };
-    types[".xls"] = { ".xls", Sig::Bin::OLE, Sig::Bin::OLE_XL,   "", false };
-    types[".ppt"] = { ".ppt", Sig::Bin::OLE, Sig::Bin::OLE_PPT,  "", false };
-    types[".docx"] = { ".docx", Sig::Bin::ZIP_HEAD, Sig::Bin::XML_WORD, Sig::Bin::ZIP_TAIL, false };
-    types[".xlsx"] = { ".xlsx", Sig::Bin::ZIP_HEAD, Sig::Bin::XML_XL,   Sig::Bin::ZIP_TAIL, false };
-    types[".pptx"] = { ".pptx", Sig::Bin::ZIP_HEAD, Sig::Bin::XML_PPT,  Sig::Bin::ZIP_TAIL, false };
-    types[".pdf"] = { ".pdf", Sig::Bin::PDF_HEAD, "", Sig::Bin::PDF_TAIL, false };
+    types[".mkv"] = { ".mkv", Sig::MKV, "", "", false };
+    types[".mp3"] = { ".mp3", Sig::MP3, "", "", false };
+
+    types[".doc"] = { ".doc", Sig::OLE, Sig::OLE_WORD, "", false };
+    types[".xls"] = { ".xls", Sig::OLE, Sig::OLE_XL,   "", false };
+    types[".ppt"] = { ".ppt", Sig::OLE, Sig::OLE_PPT,  "", false };
+
+    types[".docx"] = { ".docx", Sig::ZIP_HEAD, Sig::XML_WORD, Sig::ZIP_TAIL, false };
+    types[".xlsx"] = { ".xlsx", Sig::ZIP_HEAD, Sig::XML_XL,   Sig::ZIP_TAIL, false };
+    types[".pptx"] = { ".pptx", Sig::ZIP_HEAD, Sig::XML_PPT,  Sig::ZIP_TAIL, false };
+
+    types[".pdf"] = { ".pdf", Sig::PDF_HEAD, "", Sig::PDF_TAIL, false };
     types[".json"] = { ".json", "{ \"k\": ", "", " }", true };
     types[".html"] = { ".html", "<html><body>", "", "</body></html>", true };
     types[".xml"] = { ".xml", "<?xml version=\"1.0\"?>", "", "", true };
@@ -68,7 +96,6 @@ DataSetGenerator::DataSetGenerator() {
 
     for (const auto& kv : types) extensions.push_back(kv.first);
 
-    // Словарь для текста
     dictionary = {
         "lorem", "ipsum", "dolor", "sit", "amet", "consectetur", "adipiscing", "elit",
         "function", "var", "const", "return", "if", "else", "for", "while",
@@ -82,29 +109,25 @@ size_t DataSetGenerator::get_realistic_size(const std::string& ext, std::mt19937
     std::uniform_int_distribution<int> chance(0, 100);
     int c = chance(rng);
 
-    // [FIX] Сделал размеры более реалистичными. Видео должно быть большим.
     if (types[ext].is_text) {
-        // Текст: 1 КБ - 200 КБ
         std::uniform_int_distribution<size_t> d(1024, 200 * 1024);
         return d(rng);
     }
     else if (ext == ".mkv" || ext == ".mp3") {
-        // Медиа: 5 МБ - 50 МБ
-        std::uniform_int_distribution<size_t> d(5 * 1024 * 1024, 50 * 1024 * 1024);
+        std::uniform_int_distribution<size_t> d(1 * 1024 * 1024, 5 * 1024 * 1024); // Чуть меньше для тестов
         return d(rng);
     }
     else {
-        // Бинарники
-        if (c < 50) { // 50% мелких (10KB - 500KB)
-            std::uniform_int_distribution<size_t> d(10 * 1024, 500 * 1024);
+        if (c < 50) {
+            std::uniform_int_distribution<size_t> d(10 * 1024, 100 * 1024);
             return d(rng);
         }
-        else if (c < 90) { // 40% средних (500KB - 5MB)
-            std::uniform_int_distribution<size_t> d(500 * 1024, 5 * 1024 * 1024);
+        else if (c < 90) {
+            std::uniform_int_distribution<size_t> d(100 * 1024, 1 * 1024 * 1024);
             return d(rng);
         }
-        else { // 10% крупных (5MB - 20MB)
-            std::uniform_int_distribution<size_t> d(5 * 1024 * 1024, 20 * 1024 * 1024);
+        else {
+            std::uniform_int_distribution<size_t> d(1 * 1024 * 1024, 5 * 1024 * 1024);
             return d(rng);
         }
     }
@@ -120,7 +143,6 @@ void DataSetGenerator::fill_complex(std::stringstream& ss, size_t count, bool is
 
         while (written < count) {
             if (trap_chance(rng) < 2 && written + 30 < count) {
-                // Вставка текстовой ловушки
                 std::uniform_int_distribution<size_t> t_idx(0, TRAPS_TEXT.size() - 1);
                 std::string trap = TRAPS_TEXT[t_idx(rng)];
                 ss << trap << " ";
@@ -142,14 +164,12 @@ void DataSetGenerator::fill_complex(std::stringstream& ss, size_t count, bool is
         std::uniform_int_distribution<int> trap_chance(0, 100);
         while (written < count) {
             if (trap_chance(rng) < 2 && written + 20 < count) {
-                // Вставка бинарной ловушки
                 std::uniform_int_distribution<size_t> t_idx(0, TRAPS_BIN.size() - 1);
                 std::string trap = TRAPS_BIN[t_idx(rng)];
                 ss.write(trap.data(), trap.size());
                 written += trap.size();
             }
             else {
-                // [FIX] Используем 0xCC, чтобы случайно не сгенерить сигнатуру хвоста
                 ss.put((char)0xCC);
                 written++;
             }
@@ -190,26 +210,27 @@ std::pair<std::string, std::string> DataSetGenerator::create_payload(std::mt1993
 }
 
 void DataSetGenerator::update_stats(const std::string& ext, GenStats& stats) {
-    if (ext == ".pdf") stats.pdf++;
-    else if (ext == ".zip") stats.zip++;
-    else if (ext == ".rar") stats.rar++;
-    else if (ext == ".png") stats.png++;
-    else if (ext == ".jpg") stats.jpg++;
-    else if (ext == ".gif") stats.gif++;
-    else if (ext == ".bmp") stats.bmp++;
-    else if (ext == ".mkv") stats.mkv++;
-    else if (ext == ".mp3") stats.mp3++;
-    else if (ext == ".doc") stats.doc++;
-    else if (ext == ".xls") stats.xls++;
-    else if (ext == ".ppt") stats.ppt++;
-    else if (ext == ".docx") { stats.docx++; /*stats.zip++;*/ }
-    else if (ext == ".xlsx") { stats.xlsx++; /*stats.zip++;*/ }
-    else if (ext == ".pptx") { stats.pptx++; /*stats.zip++;*/ }
-    else if (ext == ".json") stats.json++;
-    else if (ext == ".html") stats.html++;
-    else if (ext == ".xml") stats.xml++;
-    else if (ext == ".eml") stats.eml++;
-    stats.total_files++;
+    if (ext == ".pdf") stats.add("PDF");
+    else if (ext == ".zip") stats.add("ZIP");
+    else if (ext == ".rar") stats.add("RAR");
+    else if (ext == ".png") stats.add("PNG");
+    else if (ext == ".jpg") stats.add("JPG");
+    else if (ext == ".gif") stats.add("GIF");
+    else if (ext == ".bmp") stats.add("BMP");
+    else if (ext == ".mkv") stats.add("MKV");
+    else if (ext == ".mp3") stats.add("MP3");
+    else if (ext == ".doc") stats.add("DOC");
+    else if (ext == ".xls") stats.add("XLS");
+    else if (ext == ".ppt") stats.add("PPT");
+    else if (ext == ".docx") stats.add("DOCX");
+    else if (ext == ".xlsx") stats.add("XLSX");
+    else if (ext == ".pptx") stats.add("PPTX");
+    else if (ext == ".json") stats.add("JSON");
+    else if (ext == ".html") stats.add("HTML");
+    else if (ext == ".xml") stats.add("XML");
+    else if (ext == ".eml") stats.add("EMAIL");
+
+    stats.total_files_processed++;
 }
 
 uint32_t DataSetGenerator::calculate_crc32(const std::string& data) {
@@ -220,70 +241,13 @@ uint32_t DataSetGenerator::calculate_crc32(const std::string& data) {
     return crc ^ 0xFFFFFFFF;
 }
 
-#pragma pack(push, 1) // Выравнивание структур
-
-struct PcapGlobalHeader { 
-    uint32_t magic = 0xa1b2c3d4; 
-    uint16_t vm = 2; 
-    uint16_t vn = 4; 
-    int32_t tz = 0; 
-    uint32_t sf = 0; 
-    uint32_t sl = 65535; 
-    uint32_t net = 1; 
-};
-
-struct PcapPacketHeader { 
-    uint32_t ts_sec; 
-    uint32_t ts_usec; 
-    uint32_t incl; 
-    uint32_t orig; 
-};
-// [FIX] Привел имена полей в соответствие с кодом(были сокращения)
-struct ZipLocalHeader { 
-    uint32_t sig = 0x04034b50; 
-    uint16_t ver = 20; 
-    uint16_t fl = 0; 
-    uint16_t comp = 0; 
-    uint16_t tm = 0; 
-    uint16_t dt = 0; 
-    uint32_t crc32 = 0; 
-    uint32_t comp_size = 0;
-    uint32_t uncomp_size = 0; 
-    uint16_t name_len = 0; 
-    uint16_t extra_len = 0; 
-};
-
-struct ZipDirHeader { 
-    uint32_t sig = 0x02014b50; 
-    uint16_t ver_made = 20; 
-    uint16_t ver_need = 20; 
-    uint16_t fl = 0; 
-    uint16_t comp = 0; 
-    uint16_t tm = 0; 
-    uint16_t dt = 0; 
-    uint32_t crc32 = 0; 
-    uint32_t comp_size = 0; 
-    uint32_t uncomp_size = 0; 
-    uint16_t name_len = 0; 
-    uint16_t extra_len = 0; 
-    uint16_t comment_len = 0; 
-    uint16_t disk_start = 0; 
-    uint16_t int_attr = 0; 
-    uint32_t ext_attr = 0; 
-    uint32_t local_offset = 0; 
-};
-
-struct ZipEOCD { 
-    uint32_t sig = 0x06054b50; 
-    uint16_t disk_num = 0; 
-    uint16_t disk_dir_start = 0; 
-    uint16_t num_dir_this = 0; 
-    uint16_t num_dir_total = 0; 
-    uint32_t size_dir = 0; 
-    uint32_t offset_dir = 0; 
-    uint16_t comment_len = 0; 
-};
-#pragma pack(pop) // Выравнивание структур
+#pragma pack(push, 1)
+struct PcapGlobalHeader { uint32_t magic = 0xa1b2c3d4; uint16_t vm = 2; uint16_t vn = 4; int32_t tz = 0; uint32_t sf = 0; uint32_t sl = 65535; uint32_t net = 1; };
+struct PcapPacketHeader { uint32_t ts_sec; uint32_t ts_usec; uint32_t incl; uint32_t orig; };
+struct ZipLocalHeader { uint32_t sig = 0x04034b50; uint16_t ver = 20; uint16_t fl = 0; uint16_t comp = 0; uint16_t tm = 0; uint16_t dt = 0; uint32_t crc32 = 0; uint32_t comp_size = 0; uint32_t uncomp_size = 0; uint16_t name_len = 0; uint16_t extra_len = 0; };
+struct ZipDirHeader { uint32_t sig = 0x02014b50; uint16_t ver_made = 20; uint16_t ver_need = 20; uint16_t fl = 0; uint16_t comp = 0; uint16_t tm = 0; uint16_t dt = 0; uint32_t crc32 = 0; uint32_t comp_size = 0; uint32_t uncomp_size = 0; uint16_t name_len = 0; uint16_t extra_len = 0; uint16_t comment_len = 0; uint16_t disk_start = 0; uint16_t int_attr = 0; uint32_t ext_attr = 0; uint32_t local_offset = 0; };
+struct ZipEOCD { uint32_t sig = 0x06054b50; uint16_t disk_num = 0; uint16_t disk_dir_start = 0; uint16_t num_dir_this = 0; uint16_t num_dir_total = 0; uint32_t size_dir = 0; uint32_t offset_dir = 0; uint16_t comment_len = 0; };
+#pragma pack(pop)
 
 void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t limit, int limit_type, OutputMode mode, double mix_ratio, GenStats& stats) {
     if (mode == OutputMode::FOLDER) {
@@ -313,8 +277,8 @@ void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t l
     uint32_t timestamp = (uint32_t)std::time(nullptr);
 
     while (true) {
-		if (limit_type == 0 && current_count >= limit) break; // лимит по файлам
-		if (limit_type == 1 && current_bytes >= limit) break; // лимит по байтам
+        if (limit_type == 0 && current_count >= limit) break;
+        if (limit_type == 1 && current_bytes >= limit) break;
 
         bool is_mixed = dist_mix(rng) < mix_ratio;
         auto [ext, data] = create_payload(rng, is_mixed);
@@ -354,12 +318,6 @@ void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t l
 
         current_count++;
         current_bytes += data.size();
-
-		// Прогресс бар
-        if (current_count % 20 == 0) {
-            std::cout << "\rGenerating: " << current_count << " files | "
-                << (current_bytes / 1024 / 1024) << " MB" << std::flush;
-        }
     }
 
     if (mode == OutputMode::ZIP) {
@@ -381,9 +339,6 @@ void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t l
         eocd.size_dir = cd_size; eocd.offset_dir = cd_start;
         f.write((char*)&eocd, sizeof(eocd));
     }
-
-    std::cout << "\n[Generator] Done. Total: " << current_count << " files, "
-        << (current_bytes / 1024 / 1024) << " MB.\n";
 }
 
 GenStats DataSetGenerator::generate_count(const std::filesystem::path& path, int count, OutputMode mode, double mix) {

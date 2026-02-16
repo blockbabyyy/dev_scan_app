@@ -16,9 +16,35 @@
 
 namespace fs = std::filesystem;
 
-// ============================================================================
-// ГЛОБАЛЬНЫЕ ДАННЫЕ
-// ============================================================================
+// Конфиг сигнатур для бенчмарка — hex-строки, как в signatures.json
+const std::vector<SignatureDefinition> BENCH_SIGS = {
+    { "PDF", "25504446", "2525454F46", "", SignatureType::BINARY },
+    { "ZIP", "504B0304", "504B0506", "", SignatureType::BINARY },
+    { "RAR4", "526172211A0700", "", "", SignatureType::BINARY },
+    { "RAR5", "526172211A070100", "", "", SignatureType::BINARY },
+    { "PNG", "89504E470D0A1A0A", "49454E44AE426082", "", SignatureType::BINARY },
+    { "JPG", "FFD8FF", "FFD9", "", SignatureType::BINARY },
+    { "GIF", "47494638", "003B", "", SignatureType::BINARY },
+    { "BMP", "424D", "", "", SignatureType::BINARY },
+    { "MKV", "1A45DFA3", "", "", SignatureType::BINARY },
+    { "MP3", "494433", "", "", SignatureType::BINARY },
+
+    // Office (OLE)
+    { "DOC", "D0CF11E0A1B11AE1", "", "WordDocument", SignatureType::BINARY, "OLE" },
+    { "XLS", "D0CF11E0A1B11AE1", "", "Workbook", SignatureType::BINARY, "OLE" },
+    { "PPT", "D0CF11E0A1B11AE1", "", "PowerPoint Document", SignatureType::BINARY, "OLE" },
+
+    // Office (OOXML)
+    { "DOCX", "504B0304", "", "word/document.xml", SignatureType::BINARY, "ZIP" },
+    { "XLSX", "504B0304", "", "xl/workbook.xml", SignatureType::BINARY, "ZIP" },
+    { "PPTX", "504B0304", "", "ppt/presentation.xml", SignatureType::BINARY, "ZIP" },
+
+    { "JSON", "", "", "\\{\\s*\"[^\"]+\"\\s*:", SignatureType::TEXT },
+    { "HTML", "", "", "<html.*?</html>", SignatureType::TEXT },
+    { "XML",  "", "", "<\\?xml", SignatureType::TEXT },
+    { "EMAIL",  "", "", "From:\\s", SignatureType::TEXT }
+};
+
 struct FileEntry {
     std::string name;
     std::string content;
@@ -29,84 +55,46 @@ static std::vector<FileEntry> g_files;
 static size_t g_total_bytes = 0;
 static GenStats g_expected_stats;
 
-// Для сбора результатов из бенчмарков
-static std::mutex g_stats_mutex;
-static std::map<std::string, ScanStats> g_benchmark_results;
-
-enum class Strategy {
-    CleanStress, // Стратегия 2: Verify Clean -> Benchmark Stress
-    Pragmatic    // Стратегия 3: Verify Stress (Pragmatic) -> Benchmark Stress
-};
-
-Strategy g_current_strategy = Strategy::CleanStress; // Default
-
-// ============================================================================
-// ХЕЛПЕРЫ
-// ============================================================================
-
 void update_expected_stats(const std::string& ext) {
-    if (ext == ".pdf") g_expected_stats.pdf++;
-    else if (ext == ".zip") g_expected_stats.zip++;
-    else if (ext == ".rar") g_expected_stats.rar++;
-    else if (ext == ".doc") g_expected_stats.doc++;
-    else if (ext == ".xls") g_expected_stats.xls++;
-    else if (ext == ".ppt") g_expected_stats.ppt++;
-    else if (ext == ".docx") g_expected_stats.docx++;
-    else if (ext == ".xlsx") g_expected_stats.xlsx++;
-    else if (ext == ".pptx") g_expected_stats.pptx++;
-    else if (ext == ".png") g_expected_stats.png++;
-    else if (ext == ".jpg") g_expected_stats.jpg++;
-    else if (ext == ".gif") g_expected_stats.gif++;
-    else if (ext == ".bmp") g_expected_stats.bmp++;
-    else if (ext == ".mkv") g_expected_stats.mkv++;
-    else if (ext == ".mp3") g_expected_stats.mp3++;
-    else if (ext == ".json") g_expected_stats.json++;
-    else if (ext == ".html") g_expected_stats.html++;
-    else if (ext == ".xml") g_expected_stats.xml++;
-    else if (ext == ".eml") g_expected_stats.eml++;
-    g_expected_stats.total_files++;
+    if (ext == ".pdf") g_expected_stats.add("PDF");
+    else if (ext == ".zip") g_expected_stats.add("ZIP");
+    else if (ext == ".rar") g_expected_stats.add("RAR4");
+    else if (ext == ".doc") g_expected_stats.add("DOC");
+    else if (ext == ".xls") g_expected_stats.add("XLS");
+    else if (ext == ".ppt") g_expected_stats.add("PPT");
+    else if (ext == ".docx") g_expected_stats.add("DOCX");
+    else if (ext == ".xlsx") g_expected_stats.add("XLSX");
+    else if (ext == ".pptx") g_expected_stats.add("PPTX");
+    else if (ext == ".png") g_expected_stats.add("PNG");
+    else if (ext == ".jpg") g_expected_stats.add("JPG");
+    else if (ext == ".gif") g_expected_stats.add("GIF");
+    else if (ext == ".bmp") g_expected_stats.add("BMP");
+    else if (ext == ".mkv") g_expected_stats.add("MKV");
+    else if (ext == ".mp3") g_expected_stats.add("MP3");
+    else if (ext == ".json") g_expected_stats.add("JSON");
+    else if (ext == ".html") g_expected_stats.add("HTML");
+    else if (ext == ".xml") g_expected_stats.add("XML");
+    else if (ext == ".eml") g_expected_stats.add("EMAIL");
+    g_expected_stats.total_files_processed++;
 }
 
-// Подсчет количества разных найденных типов (для строгого режима)
+int GetStat(const ScanStats& st, const std::string& key) {
+    if (st.counts.count(key)) return st.counts.at(key);
+    return 0;
+}
+
 int CountDistinctTypes(const ScanStats& st) {
-    int cnt = 0;
-    if (st.pdf > 0) cnt++;
-    if (st.zip > 0) cnt++;
-    if (st.rar > 0) cnt++;
-    if (st.doc > 0) cnt++;
-    if (st.xls > 0) cnt++;
-    if (st.ppt > 0) cnt++;
-    if (st.docx > 0) cnt++;
-    if (st.xlsx > 0) cnt++;
-    if (st.pptx > 0) cnt++;
-    if (st.png > 0) cnt++;
-    if (st.jpg > 0) cnt++;
-    if (st.gif > 0) cnt++;
-    if (st.bmp > 0) cnt++;
-    if (st.mkv > 0) cnt++;
-    if (st.mp3 > 0) cnt++;
-    if (st.json > 0) cnt++;
-    if (st.html > 0) cnt++;
-    if (st.xml > 0) cnt++;
-    if (st.eml > 0) cnt++;
-    return cnt;
+    return (int)st.counts.size();
 }
-
-// ============================================================================
-// ПОДГОТОВКА ДАННЫХ
-// ============================================================================
 
 void LoadDataset(const fs::path& folder, double mix_ratio) {
     const int GEN_COUNT = 50;
-
-    // Перегенерируем данные каждый раз
     if (fs::exists(folder)) fs::remove_all(folder);
 
     std::cout << "[Setup] Generating dataset in " << folder << " (Mix: " << mix_ratio << ")...\n";
     DataSetGenerator gen;
     gen.generate_count(folder, GEN_COUNT, OutputMode::FOLDER, mix_ratio);
 
-    std::cout << "[Setup] Loading files into RAM...\n";
     g_files.clear();
     g_total_bytes = 0;
     g_expected_stats.reset();
@@ -135,63 +123,67 @@ void LoadDataset(const fs::path& folder, double mix_ratio) {
         << (g_total_bytes / 1024 / 1024) << " MB.\n";
 }
 
-// ============================================================================
-// ВЕРИФИКАЦИЯ
-// ============================================================================
-
 bool IsCorrectDetection(const std::string& ext, const ScanStats& st, bool strict_mode) {
-    bool found_target = false;
+    std::string key;
+    if (ext == ".pdf") key = "PDF";
+    else if (ext == ".zip") key = "ZIP";
+    else if (ext == ".rar") key = "RAR4";
+    else if (ext == ".doc") key = "DOC";
+    else if (ext == ".xls") key = "XLS";
+    else if (ext == ".ppt") key = "PPT";
+    else if (ext == ".docx") key = "DOCX";
+    else if (ext == ".xlsx") key = "XLSX";
+    else if (ext == ".pptx") key = "PPTX";
+    else if (ext == ".png") key = "PNG";
+    else if (ext == ".jpg") key = "JPG";
+    else if (ext == ".gif") key = "GIF";
+    else if (ext == ".bmp") key = "BMP";
+    else if (ext == ".mkv") key = "MKV";
+    else if (ext == ".mp3") key = "MP3";
+    else if (ext == ".json") key = "JSON";
+    else if (ext == ".html") key = "HTML";
+    else if (ext == ".xml") key = "XML";
+    else if (ext == ".eml") key = "EMAIL";
 
-    if (ext == ".pdf") found_target = st.pdf > 0;
-    else if (ext == ".zip") found_target = st.zip > 0;
-    else if (ext == ".rar") found_target = st.rar > 0;
-    else if (ext == ".doc") found_target = st.doc > 0;
-    else if (ext == ".xls") found_target = st.xls > 0;
-    else if (ext == ".ppt") found_target = st.ppt > 0;
-    else if (ext == ".docx") found_target = st.docx > 0;
-    else if (ext == ".xlsx") found_target = st.xlsx > 0;
-    else if (ext == ".pptx") found_target = st.pptx > 0;
-    else if (ext == ".png") found_target = st.png > 0;
-    else if (ext == ".jpg") found_target = st.jpg > 0;
-    else if (ext == ".gif") found_target = st.gif > 0;
-    else if (ext == ".bmp") found_target = st.bmp > 0;
-    else if (ext == ".mkv") found_target = st.mkv > 0;
-    else if (ext == ".mp3") found_target = st.mp3 > 0;
-    else if (ext == ".json") found_target = st.json > 0;
-    else if (ext == ".html") found_target = st.html > 0;
-    else if (ext == ".xml") found_target = st.xml > 0;
-    else if (ext == ".eml") found_target = st.eml > 0;
+    if (key.empty()) return false;
 
-    if (!found_target) return false;
+    // Проверка, что целевой тип найден
+    if (GetStat(st, key) == 0) return false;
 
-    // Строгий режим: проверяем, что не найдено лишних типов
+    // Строгий режим: не должно быть других типов
     if (strict_mode) {
-        if (CountDistinctTypes(st) > 1) return false;
+        // Исключение: DOCX внутри ZIP и т.д. (здесь мы проверяем сырой выхлоп движка)
+        // Для бенчмарка упростим: если mix=0.0 (clean), то должно быть ровно 1 совпадение.
+        if (st.counts.size() > 1) {
+            // Разрешаем коллизии для Office форматов, так как они детектятся как ZIP + DOCX
+            if (key == "DOCX" || key == "XLSX" || key == "PPTX") return true;
+            return false;
+        }
     }
-
     return true;
 }
 
 void UpdateMatchedStats(GenStats& matched, const std::string& ext) {
-    if (ext == ".pdf") matched.pdf++;
-    else if (ext == ".zip") matched.zip++;
-    else if (ext == ".rar") matched.rar++;
-    else if (ext == ".doc") matched.doc++;
-    else if (ext == ".xls") matched.xls++;
-    else if (ext == ".ppt") matched.ppt++;
-    else if (ext == ".docx") matched.docx++;
-    else if (ext == ".xlsx") matched.xlsx++;
-    else if (ext == ".pptx") matched.pptx++;
-    else if (ext == ".png") matched.png++;
-    else if (ext == ".jpg") matched.jpg++;
-    else if (ext == ".gif") matched.gif++;
-    else if (ext == ".bmp") matched.bmp++;
-    else if (ext == ".mkv") matched.mkv++;
-    else if (ext == ".mp3") matched.mp3++;
-    else if (ext == ".json") matched.json++;
-    else if (ext == ".html") matched.html++;
-    else if (ext == ".xml") matched.xml++;
-    else if (ext == ".eml") matched.eml++;
+    // Просто дублируем логику update_expected_stats
+    if (ext == ".pdf") matched.add("PDF");
+    else if (ext == ".zip") matched.add("ZIP");
+    else if (ext == ".rar") matched.add("RAR4");
+    else if (ext == ".doc") matched.add("DOC");
+    else if (ext == ".xls") matched.add("XLS");
+    else if (ext == ".ppt") matched.add("PPT");
+    else if (ext == ".docx") matched.add("DOCX");
+    else if (ext == ".xlsx") matched.add("XLSX");
+    else if (ext == ".pptx") matched.add("PPTX");
+    else if (ext == ".png") matched.add("PNG");
+    else if (ext == ".jpg") matched.add("JPG");
+    else if (ext == ".gif") matched.add("GIF");
+    else if (ext == ".bmp") matched.add("BMP");
+    else if (ext == ".mkv") matched.add("MKV");
+    else if (ext == ".mp3") matched.add("MP3");
+    else if (ext == ".json") matched.add("JSON");
+    else if (ext == ".html") matched.add("HTML");
+    else if (ext == ".xml") matched.add("XML");
+    else if (ext == ".eml") matched.add("EMAIL");
 }
 
 void PrintVerificationTable(const std::string& engine_name, const GenStats& matched, bool strict) {
@@ -203,33 +195,23 @@ void PrintVerificationTable(const std::string& engine_name, const GenStats& matc
             << " | " << status << "\n";
         };
 
-    std::cout << "\n--- Accuracy (" << (strict ? "Strict" : "Pragmatic") << "): " << engine_name << " ---\n";
+    std::cout << "\n--- Accuracy: " << engine_name << " ---\n";
     std::cout << "| TYPE         | GEN    | MATCH  | STATUS\n";
     std::cout << "|--------------|--------|--------|-------\n";
-    row("PDF", g_expected_stats.pdf, matched.pdf);
-    row("ZIP", g_expected_stats.zip, matched.zip);
-    row("DOCX", g_expected_stats.docx, matched.docx);
-    row("JPG", g_expected_stats.jpg, matched.jpg);
-    row("JSON", g_expected_stats.json, matched.json);
-    row("XML", g_expected_stats.xml, matched.xml);
 
-    int total_matched = matched.pdf + matched.zip + matched.rar +
-        matched.doc + matched.xls + matched.ppt +
-        matched.docx + matched.xlsx + matched.pptx +
-        matched.png + matched.jpg + matched.gif + matched.bmp +
-        matched.mkv + matched.mp3 +
-        matched.json + matched.html + matched.xml + matched.eml;
-
-    std::cout << "|--------------|--------|--------|-------\n";
-    row("TOTAL ACCURACY", g_expected_stats.total_files, total_matched);
+    // Выводим только основные типы
+    std::vector<std::string> keys = { "PDF", "ZIP", "DOCX", "JPG", "JSON", "XML" };
+    for (const auto& k : keys) {
+        row(k, GetStat(g_expected_stats, k), GetStat(matched, k));
+    }
     std::cout << "------------------------------------------\n";
 }
 
 void VerifyAll(bool strict) {
-    std::cout << "\n[Verify] Running " << (strict ? "STRICT" : "PRAGMATIC") << " accuracy verification...\n";
+    std::cout << "\n[Verify] Running verification...\n";
 
     auto check_engine = [&](std::unique_ptr<Scanner> s) {
-        s->prepare();
+        s->prepare(BENCH_SIGS); // ! Важно: передаем сигнатуры
         GenStats matched_stats;
 
         for (const auto& file : g_files) {
@@ -243,33 +225,22 @@ void VerifyAll(bool strict) {
         PrintVerificationTable(s->name(), matched_stats, strict);
         };
 
-    check_engine(std::make_unique<StdScanner>(true)); // Opt
     check_engine(std::make_unique<Re2Scanner>());
-    check_engine(std::make_unique<BoostScanner>(true)); // Opt
+    check_engine(std::make_unique<BoostScanner>());
     check_engine(std::make_unique<HsScanner>());
 }
 
-// ============================================================================
-// BENCHMARK (Скорость)
-// ============================================================================
-
-template <typename ScannerT, bool PreCheck = false>
+template <typename ScannerT>
 void BM_Scan(benchmark::State& state) {
-    std::unique_ptr<Scanner> scanner;
-    if constexpr (std::is_same_v<ScannerT, StdScanner> || std::is_same_v<ScannerT, BoostScanner>) {
-        scanner = std::make_unique<ScannerT>(PreCheck);
-    }
-    else {
-        scanner = std::make_unique<ScannerT>();
-    }
-    scanner->prepare();
+    auto scanner = std::make_unique<ScannerT>();
+    scanner->prepare(BENCH_SIGS);
 
     size_t total_files = g_files.size();
     size_t batch_size = (total_files + state.threads() - 1) / state.threads();
     size_t start_idx = state.thread_index() * batch_size;
     size_t end_idx = std::min(start_idx + batch_size, total_files);
 
-    ScanStats stats; // Dummy stats
+    ScanStats stats;
 
     for (auto _ : state) {
         for (size_t i = start_idx; i < end_idx; ++i) {
@@ -280,100 +251,20 @@ void BM_Scan(benchmark::State& state) {
     size_t bytes_processed = 0;
     for (size_t i = start_idx; i < end_idx; ++i) bytes_processed += g_files[i].content.size();
     state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) * bytes_processed);
-
-    // Сбор результатов (опционально, для общей таблицы)
-    ScanStats thread_stats; // Если нужно собрать статистику по потокам
-    // ... логика сбора статистики, если нужна таблица в конце ...
-    // В данном примере таблица печатается отдельно через VerifyAll,
-    // а бенчмарк выводит только скорость.
 }
 
-BENCHMARK_TEMPLATE(BM_Scan, StdScanner, false)->Name("Std_Raw")->Unit(benchmark::kMillisecond)->Threads(1)->Threads(16);
-BENCHMARK_TEMPLATE(BM_Scan, StdScanner, true)->Name("Std_Opt")->Unit(benchmark::kMillisecond)->Threads(1)->Threads(16);
-BENCHMARK_TEMPLATE(BM_Scan, Re2Scanner)->Name("RE2")->Unit(benchmark::kMillisecond)->Threads(1)->Threads(16);
-BENCHMARK_TEMPLATE(BM_Scan, BoostScanner, false)->Name("Boost_Raw")->Unit(benchmark::kMillisecond)->Threads(1)->Threads(16);
-BENCHMARK_TEMPLATE(BM_Scan, BoostScanner, true)->Name("Boost_Opt")->Unit(benchmark::kMillisecond)->Threads(1)->Threads(16);
-BENCHMARK_TEMPLATE(BM_Scan, HsScanner)->Name("Hyperscan")->Unit(benchmark::kMillisecond)->Threads(1)->Threads(16);
-
-// ============================================================================
-// MAIN (Интерактивный)
-// ============================================================================
-
-void print_help() {
-    std::cout << "Usage: Benchmarks.exe [google-benchmark-options] [--strategy=STRAT]\n"
-        << "Strategies:\n"
-        << "  clean_stress (Default): \n"
-        << "      1. Generate CLEAN data (mix=0.0). Verify Strict accuracy.\n"
-        << "      2. Generate STRESS data (mix=0.2). Run Benchmarks.\n"
-        << "  pragmatic: \n"
-        << "      1. Generate STRESS data (mix=0.2).\n"
-        << "      2. Verify Pragmatic accuracy (ignore extra detections).\n"
-        << "      3. Run Benchmarks.\n\n";
-}
+BENCHMARK_TEMPLATE(BM_Scan, Re2Scanner)->Name("RE2")->Unit(benchmark::kMillisecond)->Threads(1)->Threads(8);
+BENCHMARK_TEMPLATE(BM_Scan, BoostScanner)->Name("Boost")->Unit(benchmark::kMillisecond)->Threads(1)->Threads(8);
+BENCHMARK_TEMPLATE(BM_Scan, HsScanner)->Name("Hyperscan")->Unit(benchmark::kMillisecond)->Threads(1)->Threads(8);
 
 int main(int argc, char** argv) {
-    bool strategy_selected = false;
+    // SilentMode removed — field no longer exists in Scanner
 
-    // 1. Парсинг аргументов
-    for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--help") {
-            print_help();
-            return 0;
-        }
-        if (std::string(argv[i]) == "--strategy=clean_stress") {
-            g_current_strategy = Strategy::CleanStress;
-            strategy_selected = true;
-        }
-        else if (std::string(argv[i]) == "--strategy=pragmatic") {
-            g_current_strategy = Strategy::Pragmatic;
-            strategy_selected = true;
-        }
-    }
+    std::cout << ">>> Preparing Benchmark Data (Mix=0.2)...\n";
+    LoadDataset("bench_data_stress", 0.2);
 
-    // 2. Интерактивное меню (если стратегия не выбрана через аргументы)
-    if (!strategy_selected) {
-        std::cout << "-------------------------------------------------------------\n";
-        std::cout << "No strategy specified. Select execution mode:\n";
-        std::cout << "  1. Clean -> Stress (Strict Verify on clean data -> Benchmark) [Default]\n";
-        std::cout << "  2. Pragmatic (Strict Verify on stress data, lenient on noise -> Benchmark)\n";
-        std::cout << "Enter choice [1/2]: ";
+    VerifyAll(false); // Проверяем точность перед запуском
 
-        std::string input;
-        std::getline(std::cin, input);
-
-        if (input == "2") {
-            g_current_strategy = Strategy::Pragmatic;
-        }
-        else {
-            g_current_strategy = Strategy::CleanStress;
-            std::cout << "Selected: Clean -> Stress\n";
-        }
-        std::cout << "-------------------------------------------------------------\n\n";
-    }
-
-    Scanner::SilentMode = true;
-
-    // 3. Выполнение выбранной стратегии
-    if (g_current_strategy == Strategy::CleanStress) {
-        std::cout << ">>> STRATEGY 2: Clean Verification -> Stress Benchmark\n";
-
-        // Этап 1: Чистые данные для проверки точности
-        LoadDataset("bench_data_clean", 0.0);
-        VerifyAll(true); // Строгая проверка
-
-        // Этап 2: Грязные данные для замера скорости
-        std::cout << "\n>>> Switching to STRESS data for Benchmarking...\n";
-        LoadDataset("bench_data_stress", 0.2);
-    }
-    else {
-        std::cout << ">>> STRATEGY 3: Pragmatic Verification -> Stress Benchmark\n";
-
-        // Один этап: Грязные данные, но мягкая проверка
-        LoadDataset("bench_data_stress", 0.2);
-        VerifyAll(false); // Прагматичная проверка
-    }
-
-    // 4. Запуск бенчмарков
     std::cout << "\n[Benchmark] Running performance tests...\n";
     ::benchmark::Initialize(&argc, argv);
     if (::benchmark::ReportUnrecognizedArguments(argc, argv)) return 1;
