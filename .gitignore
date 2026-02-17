@@ -416,3 +416,6 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+input/
+CMakeSettings.json
+dev_scan_app.zip

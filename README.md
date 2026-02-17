@@ -1,95 +1,227 @@
-# RegexBench
+# DevScan
 
-This is alpha version of app which aim is to find files of any types inside diffirent types of containers.
+Инструмент глубокого поиска файловых сигнатур внутри произвольных контейнеров: папок, ZIP-архивов, бинарных склеек (BIN) и дампов трафика (PCAP).
 
-Now, the programm is for debugging of regex libraries. 
+## Возможности
 
-To-do:
-- add generator unstructured dataset (files of any types in some container);
-- benchmark of libraries;
-- transition to the beta version (console app complians with all OOP rules).
+- **Три движка сканирования**: [Hyperscan](https://github.com/intel/hyperscan) (по умолчанию), [RE2](https://github.com/google/re2), [Boost.Regex](https://www.boost.org/doc/libs/release/libs/regex/)
+- **21 тип файлов** из коробки (PDF, ZIP, RAR4/5, PNG, JPG, GIF, BMP, MKV, MP3, OLE, DOC, XLS, PPT, DOCX, XLSX, PPTX, JSON, HTML, XML, EMAIL)
+- **Коррекция коллизий** — DOCX/XLSX/PPTX автоматически вычитаются из ZIP, DOC/XLS/PPT из OLE
+- **Конфигурируемые сигнатуры** — добавляйте свои типы через `signatures.json`
+- **Экспорт результатов** — отчёты в JSON и TXT (`crash_report/report.json`, `crash_report/report.txt`)
+- **Логирование** — лог-файл в `crash_report/devscan_YYYYMMDD_HHMMSS.log`
+- **Бенчмарки** — сравнение производительности движков на сгенерированных датасетах
 
-## Features
+## Структура проекта
 
-*   Benchmarks multiple regex engines: std::regex, [RE2](https://github.com/google/re2), [Boost.Regex](https://www.boost.org/doc/libs/release/libs/regex/), and [Hyperscan](https://github.com/intel/hyperscan).
-*   Uses [Google Benchmark](https://github.com/google/benchmark) for standardized performance measurement.
-*   Configured with CMake for cross-platform building.
+```
+DevScan/
+├── include/
+│   ├── Scaner.h            # Интерфейс Scanner + движки (Boost, RE2, Hyperscan)
+│   ├── ConfigLoader.h      # Загрузка сигнатур из JSON
+│   ├── TypeMap.h            # Маппинг расширений -> имён типов
+│   ├── Logger.h             # Логгер (crash_report/)
+│   ├── ReportWriter.h       # Экспорт результатов (JSON/TXT)
+│   └── generator/
+│       └── Generator.h      # Генератор тестовых датасетов
+├── src/
+│   ├── Scaner.cpp           # Реализации движков
+│   ├── cli/
+│   │   └── main_cli.cpp     # CLI-приложение
+│   └── generator/
+│       └── Generator.cpp    # Реализация генератора
+├── tests/
+│   ├── ScanerTests.cpp      # Юнит-тесты (12 тестов, 3 движка x 4 кейса)
+│   ├── IntegrationTests.cpp # Интеграционные тесты (Folder, ZIP, BIN, PCAP)
+│   └── Benchmarks.cpp       # Бенчмарки производительности
+├── signatures.json          # База сигнатур
+└── CMakeLists.txt
+```
 
-## Prerequisites
+## Требования
 
-*   A C++ compiler supporting C++17 or later.
-*   [CMake](https://cmake.org/) version 3.21 or higher.
-*   [vcpkg](https://vcpkg.io/en/getting-started.html) as the C++ package manager.
+- C++17
+- [CMake](https://cmake.org/) >= 3.21
+- [vcpkg](https://vcpkg.io/)
 
-### Installing vcpkg
+### Зависимости (vcpkg)
 
-If you haven't installed `vcpkg` yet, please follow the official [Getting Started Guide](https://vcpkg.io/en/getting-started.html). This typically involves cloning the repository and running the bootstrap script.
+```bash
+vcpkg install hyperscan re2 boost-regex boost-iostreams nlohmann-json gtest benchmark
+```
 
-## Dependencies
+## Сборка
 
-This project relies on the following libraries, managed by `vcpkg`:
+```bash
+mkdir build && cd build
+cmake .. -DCMAKE_TOOLCHAIN_FILE=<путь_к_vcpkg>/scripts/buildsystems/vcpkg.cmake
+cmake --build . --config Release
+```
 
-*   `benchmark`
-*   `boost-regex`
-*   `re2`
-*   `hyperscan` (See manual installation step below)
+Будут собраны три таргета:
 
-If you're going to use other package managers of diffirent ways, follow giudes for each library.
-### Installing Dependencies via vcpkg
+| Таргет | Описание |
+|---|---|
+| `DevScanApp` | CLI-приложение |
+| `DevScanTests` | Юнит- и интеграционные тесты (GTest) |
+| `DevScanBenchmarks` | Бенчмарки (Google Benchmark) |
 
-1.  **Install `hyperscan` manually:** `vcpkg` does not currently provide a pre-built `hyperscan` package in its default registry. You need to install it manually using the port provided in the `vcpkg` repository.
-    *   Navigate to your `vcpkg` installation directory.
-    *   Run the following command, replacing `<your-triplet>` (e.g., `x64-windows`, `x64-linux`) with your target platform triplet:
-        ```bash
-        ./vcpkg install hyperscan[tools]:<your-triplet>
-        ```
-        *Example for Windows x64:*
-        ```cmd
-        vcpkg install hyperscan[tools]:x64-windows
-        ```
-        or jsut
-        ```cmd
-        vcpkg install hyperscan
-        ```
-    *   **Note:** The `[tools]` feature is often required for Hyperscan. Adjust the command based on your specific needs or if the port definition changes.
+## Использование
 
-2.  **Install other dependencies:** After installing `hyperscan`, install the remaining dependencies using `vcpkg`:
-    ```bash
-    ./vcpkg install benchmark boost-regex re2 --triplet <your-triplet>
-    ```
+### Базовый запуск
 
-## Building the Project
+```bash
+DevScanApp.exe <путь_к_папке_или_файлу>
+```
 
-1.  **Configure `CMakeLists.txt`:**
-    *   Open the `CMakeLists.txt` file in this project's root directory.
-    *   Locate the lines setting `VCPKG_ROOT` and `VCPKG_DEFAULT_TRIPLET`.
-    *   Manually update the `VCPKG_ROOT` variable to point to the absolute path of your `vcpkg` installation directory (e.g., `/path/to/vcpkg` on Linux/macOS or `C:\path\to\vcpkg` on Windows).
-    *   Ensure the `VCPKG_DEFAULT_TRIPLET` matches the triplet you used when installing the dependencies via `vcpkg` (e.g., `x64-windows`).
+### С параметрами
 
-2.  **Create a build directory:**
-    ```bash
-    mkdir build
-    cd build
-    ```
+```bash
+DevScanApp.exe C:/data -c my_sigs.json -e re2
+```
 
-3.  **Configure the project with CMake:**
-    ```bash
-    cmake .. -DCMAKE_TOOLCHAIN_FILE=<path_to_your_vcpkg>/scripts/buildsystems/vcpkg.cmake -DVCPKG_TARGET_TRIPLET=<your_triplet>
-    ```
-    Replace `<path_to_your_vcpkg>` with the path to your `vcpkg` directory and `<your_triplet>` with your specific triplet (e.g., `x64-windows`).
+| Опция | Описание |
+|---|---|
+| `-c, --config <file>` | Путь к файлу сигнатур (по умолчанию: `signatures.json`) |
+| `-e, --engine <type>` | Движок: `hs` (Hyperscan), `re2`, `boost` |
 
-    *Alternatively,* if you have set the `VCPKG_ROOT` and `VCPKG_DEFAULT_TRIPLET` correctly in the `CMakeLists.txt`, the toolchain file should be found automatically, and you might only need:
-    ```bash
-    cmake ..
-    ```
+### Вывод
 
-4.  **Build the executable:**
-    ```bash
-    cmake --build . --config Release
-    # Or simply: make (on Unix-like systems)
-    # Or: msbuild RegexBench.sln /p:Configuration=Release (on Windows with MSBuild)
-    ```
+После сканирования программа:
+1. Выводит таблицу результатов в stdout
+2. Сохраняет `crash_report/report.json` и `crash_report/report.txt`
+3. Пишет лог в `crash_report/devscan_YYYYMMDD_HHMMSS.log`
 
-## Running the Benchmarks
+Пример вывода:
 
-Execute the generated binary (e.g., `./RegexBench` on Unix-like systems or `RegexBench.exe` on Windows) to run the benchmarks.
+```
+[Info] Сканирование: C:/data движком Hyperscan...
+
+--- РЕЗУЛЬТАТЫ СКАНЕРА ---
+Тип файла       | Найдено
+--------------------------
+PDF             | 10
+ZIP             | 5
+DOC             | 3
+--------------------------
+Всего файлов обработано: 150
+
+[Отчёты] crash_report/report.json, crash_report/report.txt
+[Лог]    crash_report/devscan_20260217_143052.log
+```
+
+### Формат report.json
+
+```json
+{
+  "scan_target": "C:/data",
+  "engine": "Hyperscan",
+  "total_files_processed": 150,
+  "detections": {
+    "PDF": 10,
+    "ZIP": 5,
+    "DOC": 3
+  }
+}
+```
+
+## Сигнатуры
+
+Сигнатуры хранятся в `signatures.json`. Каждая запись содержит:
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `name` | string | Имя типа (например, `"PDF"`) |
+| `type` | string | `"binary"` или `"text"` |
+| `hex_head` | string | Magic bytes начала файла (HEX) |
+| `hex_tail` | string | Magic bytes конца файла (HEX, опционально) |
+| `pattern` | string | Regex-паттерн для текстовых сигнатур |
+| `text_pattern` | string | Дополнительный текстовый якорь для бинарных сигнатур |
+| `deduct_from` | string | Тип-родитель для вычитания коллизий (опционально) |
+
+### Пример: бинарная сигнатура
+
+```json
+{
+  "name": "MY_FORMAT",
+  "type": "binary",
+  "hex_head": "4D5A",
+  "hex_tail": "00000000",
+  "deduct_from": "ZIP"
+}
+```
+
+### Пример: текстовая сигнатура
+
+```json
+{
+  "name": "LOG_ERROR",
+  "type": "text",
+  "pattern": "Error:\\s\\d+"
+}
+```
+
+### Механизм вычитания (deduct_from)
+
+Некоторые форматы являются подмножествами других (DOCX это ZIP с определённой структурой, DOC это OLE). Поле `deduct_from` автоматически корректирует счётчик родительского типа:
+
+```
+ZIP: 15  (до коррекции)
+DOCX: 5, XLSX: 3, PPTX: 2  (deduct_from: ZIP)
+ZIP: 5   (после коррекции: 15 - 5 - 3 - 2 = 5)
+```
+
+## Тесты
+
+```bash
+# Запуск всех тестов
+./DevScanTests
+
+# Через CTest
+ctest --test-dir build
+```
+
+### Набор тестов (16 тестов)
+
+**Юнит-тесты** (12 = 3 движка x 4 кейса):
+- `Detection_PDF` — детекция PDF по head + tail
+- `Detection_ZIP` — детекция ZIP по head
+- `Office_Vs_Zip_No_Deduction` — DOCX внутри ZIP без вычитания
+- `Empty_Data` — пустой ввод
+
+**Интеграционные тесты** (4):
+- `Folder_Scan_With_Generator` — генерация папки с 50 файлами, проверка всех типов
+- `Zip_Archive_Internal_Scan` — генерация ZIP-архива, детекция ZIP-структуры
+- `Bin_Concat_Scan` — генерация бинарной склейки (30 файлов), проверка всех типов
+- `Pcap_Dump_Scan` — генерация PCAP-дампа (30 файлов), проверка всех типов
+
+## Бенчмарки
+
+```bash
+./DevScanBenchmarks
+```
+
+Сравнивает производительность Hyperscan, RE2 и Boost.Regex на сгенерированных датасетах разных режимов (FOLDER, BIN, PCAP).
+
+## Логирование
+
+Логгер автоматически инициализируется при запуске `DevScanApp`. Все события пишутся в файл `crash_report/devscan_YYYYMMDD_HHMMSS.log`:
+
+| Уровень | Файл | stderr |
+|---|---|---|
+| `INFO` | да | нет |
+| `WARN` | да | да |
+| `ERROR` | да | да |
+
+Формат строки лога:
+
+```
+[2026-02-17 14:30:52] [INFO] DevScan запущен
+[2026-02-17 14:30:52] [INFO] Загрузка конфигурации: signatures.json
+[2026-02-17 14:30:52] [WARN] Пропуск файла C:/data/locked.bin: permission denied
+[2026-02-17 14:30:53] [INFO] Сканирование завершено. Файлов обработано: 150
+```
+
+## Лицензия
+
+MIT

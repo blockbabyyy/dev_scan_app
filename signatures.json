@@ -1,0 +1,128 @@
+[
+    {
+        "name": "PDF",
+        "type": "binary",
+        "hex_head": "25504446",
+        "hex_tail": "2525454F46"
+    },
+    {
+        "name": "ZIP",
+        "type": "binary",
+        "hex_head": "504B0304",
+        "hex_tail": "504B0506"
+    },
+    {
+        "name": "RAR4",
+        "type": "binary",
+        "hex_head": "526172211A0700"
+    },
+    {
+        "name": "RAR5",
+        "type": "binary",
+        "hex_head": "526172211A070100"
+    },
+    {
+        "name": "PNG",
+        "type": "binary",
+        "hex_head": "89504E470D0A1A0A",
+        "hex_tail": "49454E44AE426082"
+    },
+    {
+        "name": "JPG",
+        "type": "binary",
+        "hex_head": "FFD8FF",
+        "hex_tail": "FFD9"
+    },
+    {
+        "name": "GIF",
+        "type": "binary",
+        "hex_head": "47494638",
+        "hex_tail": "003B"
+    },
+    {
+        "name": "BMP",
+        "type": "binary",
+        "hex_head": "424D"
+    },
+    {
+        "name": "MKV",
+        "type": "binary",
+        "hex_head": "1A45DFA3"
+    },
+    {
+        "name": "MP3",
+        "type": "binary",
+        "hex_head": "494433"
+    },
+
+    {
+        "name": "OLE",
+        "type": "binary",
+        "hex_head": "D0CF11E0A1B11AE1"
+    },
+
+    {
+        "name": "DOC",
+        "type": "binary",
+        "hex_head": "D0CF11E0A1B11AE1",
+        "text_pattern": "WordDocument",
+        "deduct_from": "OLE"
+    },
+    {
+        "name": "XLS",
+        "type": "binary",
+        "hex_head": "D0CF11E0A1B11AE1",
+        "text_pattern": "Workbook",
+        "deduct_from": "OLE"
+    },
+    {
+        "name": "PPT",
+        "type": "binary",
+        "hex_head": "D0CF11E0A1B11AE1",
+        "text_pattern": "PowerPoint Document",
+        "deduct_from": "OLE"
+    },
+
+    {
+        "name": "DOCX",
+        "type": "binary",
+        "hex_head": "504B0304",
+        "text_pattern": "word/document.xml",
+        "deduct_from": "ZIP"
+    },
+    {
+        "name": "XLSX",
+        "type": "binary",
+        "hex_head": "504B0304",
+        "text_pattern": "xl/workbook.xml",
+        "deduct_from": "ZIP"
+    },
+    {
+        "name": "PPTX",
+        "type": "binary",
+        "hex_head": "504B0304",
+        "text_pattern": "ppt/presentation.xml",
+        "deduct_from": "ZIP"
+    },
+
+    {
+        "name": "JSON",
+        "type": "text",
+        "pattern": "\\{\\s*\"[^\"]+\"\\s*:"
+    },
+    {
+        "name": "HTML",
+        "type": "text",
+        "pattern": "<html.*?</html>"
+    },
+    {
+        "name": "XML",
+        "type": "text",
+        "pattern": "<\\?xml"
+    },
+    {
+        "name": "EMAIL",
+        "type": "text",
+        "pattern": "From:\\s"
+    }
+]

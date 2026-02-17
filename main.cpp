@@ -1,272 +1,324 @@
-#include <iostream>
-#include <fstream>
+п»ї#include <iostream>
 #include <vector>
+#include <string>
 #include <filesystem>
-#include <re2/re2.h>
-#include <boost/regex.hpp>
-#include <boost/algorithm/string/replace.hpp> // для экранирования спецсимволов в boost
-#include <regex>
-#include <hs/hs.h> // Hyperscan
+#include <chrono>
+#include <fstream>
+#include <iomanip>
+#include <cstring>
+#include <algorithm>
+#include <numeric>
+
+#include "Scaner.h"
+#include "generator/Generator.h"
 
 namespace fs = std::filesystem;
 
-// Сигнатуры для проверки (magic bytes)
-const std::string pdf_header = "%PDF";
-const std::string doc_header = "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1";
-const std::string png_header = "\x89PNG\r\n\x1A\n";
-const std::string rar4_header = "\x52\x61\x72\x21\x1A\x07\x00";
-const std::string rar5_header = "\x52\x61\x72\x21\x1A\x07\x01\x00";
-
-// RE2 (Google)
-bool check_file_signature_re2(const std::string& file_path, const std::string& signature, size_t size, re2::RE2::Options& opt) {
-    re2::RE2 regex("^" + signature, opt); // ^ - обязательно начало файла
-    std::ifstream file(file_path, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "Ошибка открытия файла (RE2): " << file_path << std::endl;
-        return false;
-    }
-
-    std::vector<char> buffer(size);
-    file.read(buffer.data(), size);
-    file.close();
-
-    re2::StringPiece data(buffer.data(), size);
-    return RE2::PartialMatch(data, regex);
+std::string read_file(const fs::path& path) {
+    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    if (!f) return "";
+    auto size = f.tellg();
+    if (size <= 0) return "";
+    std::string str(size, '\0');
+    f.seekg(0);
+    f.read(&str[0], size);
+    return str;
 }
 
-// Boost.Regex: тут надо экранировать спецсимволы вручную, т.к. escape нет
-bool check_file_signature_boost(const std::string& file_path, const std::string& signature, size_t size) {
-    // Экранирую все спецсимволы boost-овским replace_all (см. доку boost::regex)
-    std::string escaped_sig = signature;
-    boost::replace_all(escaped_sig, "\\", "\\\\");
-    boost::replace_all(escaped_sig, "^", "\\^");
-    boost::replace_all(escaped_sig, ".", "\\.");
-    boost::replace_all(escaped_sig, "$", "\\$");
-    boost::replace_all(escaped_sig, "|", "\\|");
-    boost::replace_all(escaped_sig, "(", "\\(");
-    boost::replace_all(escaped_sig, ")", "\\)");
-    boost::replace_all(escaped_sig, "[", "\\[");
-    boost::replace_all(escaped_sig, "]", "\\]");
-    boost::replace_all(escaped_sig, "*", "\\*");
-    boost::replace_all(escaped_sig, "+", "\\+");
-    boost::replace_all(escaped_sig, "?", "\\?");
-    boost::replace_all(escaped_sig, "{", "\\{");
-    boost::replace_all(escaped_sig, "}", "\\}");
-
-    boost::regex regex("^" + escaped_sig, boost::regex::perl | boost::regex::nosubs);
-
-    std::ifstream file(file_path, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "Ошибка открытия файла (Boost.Regex): " << file_path << std::endl;
-        return false;
-    }
-
-    std::vector<char> buffer(size);
-    file.read(buffer.data(), size);
-    file.close();
-
-    std::string data(buffer.data(), size);
-    return boost::regex_search(data, regex);
+// [FIX] РџРѕРґСЃС‡РµС‚ РєРѕР»РёС‡РµСЃС‚РІР° Р РђР—РќР«РҐ С‚РёРїРѕРІ (РєР°С‚РµРіРѕСЂРёР№), Р° РЅРµ СЃСѓРјРјС‹ СЃРѕРІРїР°РґРµРЅРёР№
+int count_distinct_types(const ScanStats& st) {
+    int types = 0;
+    if (st.pdf > 0) types++;
+    if (st.zip > 0) types++;
+    if (st.rar > 0) types++;
+    if (st.doc > 0) types++;
+    if (st.xls > 0) types++;
+    if (st.ppt > 0) types++;
+    if (st.docx > 0) types++;
+    if (st.xlsx > 0) types++;
+    if (st.pptx > 0) types++;
+    if (st.png > 0) types++;
+    if (st.jpg > 0) types++;
+    if (st.gif > 0) types++;
+    if (st.bmp > 0) types++;
+    if (st.mkv > 0) types++;
+    if (st.mp3 > 0) types++;
+    if (st.json > 0) types++;
+    if (st.html > 0) types++;
+    if (st.xml > 0) types++;
+    if (st.eml > 0) types++;
+    return types;
 }
 
-// std::regex: почти то же самое, что и boost, но другой синтаксис
-bool check_file_signature_std(const std::string& file_path, const std::string& signature, size_t size) {
-    // Экранирую спецсимволы вручную (см. ECMAScript синтаксис)
-    std::string escaped_sig = signature;
-    std::string specials = R"(\^.$|()[]*+?{})";
-    for (char c : specials) {
-        std::string s(1, c);
-        std::string r = "\\" + s;
-        size_t pos = 0;
-        while ((pos = escaped_sig.find(s, pos)) != std::string::npos) {
-            escaped_sig.replace(pos, 1, r);
-            pos += r.size();
-        }
-    }
-
-    std::regex regex("^" + escaped_sig, std::regex::ECMAScript);
-
-    std::ifstream file(file_path, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "Ошибка открытия файла (std::regex): " << file_path << std::endl;
-        return false;
-    }
-
-    std::vector<char> buffer(size);
-    file.read(buffer.data(), size);
-    file.close();
-
-    std::string data(buffer.data(), size);
-    return std::regex_search(data, regex);
+// РҐРµР»РїРµСЂ РґР»СЏ РЅРѕСЂРјР°Р»РёР·Р°С†РёРё (РµСЃР»Рё РЅР°С€Р»Рё 15 json РІС…РѕР¶РґРµРЅРёР№ РІ С„Р°Р№Р»Рµ, СЃС‡РёС‚Р°РµРј РєР°Рє 1 С„Р°Р№Р»)
+ScanStats normalize_stats(const ScanStats& st) {
+    ScanStats n = st;
+    if (n.pdf > 1) n.pdf = 1;
+    if (n.zip > 1) n.zip = 1;
+    if (n.rar > 1) n.rar = 1;
+    if (n.doc > 1) n.doc = 1;
+    if (n.xls > 1) n.xls = 1;
+    if (n.ppt > 1) n.ppt = 1;
+    if (n.docx > 1) n.docx = 1;
+    if (n.xlsx > 1) n.xlsx = 1;
+    if (n.pptx > 1) n.pptx = 1;
+    if (n.png > 1) n.png = 1;
+    if (n.jpg > 1) n.jpg = 1;
+    if (n.gif > 1) n.gif = 1;
+    if (n.bmp > 1) n.bmp = 1;
+    if (n.mkv > 1) n.mkv = 1;
+    if (n.mp3 > 1) n.mp3 = 1;
+    if (n.json > 1) n.json = 1;
+    if (n.html > 1) n.html = 1;
+    if (n.xml > 1) n.xml = 1;
+    if (n.eml > 1) n.eml = 1;
+    return n;
 }
 
-bool check_file_signature_hs(const std::string& file_path, const std::string& signature, size_t size) {
-    hs_database_t* database = nullptr; // Указатель на скомпилированную базу данных регулярных выражений
-    hs_compile_error_t* compile_err; // Указатель на ошибку компиляции
-    hs_scratch_t* scratch = nullptr; // Указатель на область памяти для выполнения поиска
-
-    std::string pattern = "^" + signature; // ^ - обязательно начало файла
-    if (hs_compile(pattern.c_str(), HS_FLAG_DOTALL, HS_MODE_BLOCK, nullptr, &database, &compile_err) != HS_SUCCESS) {
-        std::cerr << "Ошибка компиляции шаблона Hyperscan: " << compile_err->message << std::endl;
-        hs_free_compile_error(compile_err);
-        return false;
-    }
-
-    if (hs_alloc_scratch(database, &scratch) != HS_SUCCESS) {
-        std::cerr << "Ошибка выделения памяти для Hyperscan." << std::endl;
-        hs_free_database(database);
-        return false;
-    }
-
-    std::ifstream file(file_path, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "Ошибка открытия файла (Hyperscan): " << file_path << std::endl;
-        hs_free_scratch(scratch);
-        hs_free_database(database);
-        return false;
-	}
-    std::vector<char> buffer(size);
-	file.read(buffer.data(), size);
-    file.close();
-    
-    bool matched = false;
-
-	// hs_scan требует callback-функцию для обработки совпадений
-    auto on_match = [](unsigned int id,                     // номер совпавшего шаблона
-		               unsigned long long from,             // смещение начала совпадения
-		               unsigned long long to,              // смещение конца совпадения
-		               unsigned int flags,                  // флаги совпадения
-                       void* context) -> int {
-        bool* matched_ptr = static_cast<bool*>(context);
-        *matched_ptr = true;
-        return 0; // Продолжаем поиск
-    };
-
-    if (hs_scan(database, buffer.data(), size, 0, scratch, on_match, &matched) != HS_SUCCESS) {
-        std::cerr << "Ошибка сканирования файла Hyperscan." << std::endl;
-    }
-    hs_free_scratch(scratch);
-    hs_free_database(database);
-	return matched;
-
+// РҐРµР»РїРµСЂ РґР»СЏ СЃСѓРјРјС‹ "С„Р°Р№Р»РѕРІ РЅР°Р№РґРµРЅРѕ" (РґР»СЏ С‚Р°Р±Р»РёС†С‹)
+int sum_files_found(const ScanStats& st) {
+    return st.pdf + st.zip + st.rar +
+        st.doc + st.xls + st.ppt +
+        st.docx + st.xlsx + st.pptx +
+        st.png + st.jpg + st.gif + st.bmp +
+        st.mkv + st.mp3 +
+        st.json + st.html + st.xml + st.eml;
 }
-// Основная функция подсчёта файлов по сигнатурам для всех трёх regex-движков
-void count_files(const std::string& directory, re2::RE2::Options& opt) {
-    // Счётчики для каждого движка
-    int pdf_count_re2 = 0, docx_count_re2 = 0, png_count_re2 = 0, rar_count_re2 = 0, other_count_re2 = 0;
-    int pdf_count_boost = 0, docx_count_boost = 0, png_count_boost = 0, rar_count_boost = 0, other_count_boost = 0;
-    int pdf_count_std = 0, docx_count_std = 0, png_count_std = 0, rar_count_std = 0, other_count_std = 0;
-    int pdf_count_hs = 0, docx_count_hs = 0, png_count_hs = 0, rar_count_hs = 0, other_count_hs = 0;
 
-    try {
-        for (const auto& entry : fs::directory_iterator(directory)) {
-            if (fs::is_regular_file(entry)) {
-                const std::string file_path = entry.path().string();
+void save_debug_sample(const std::string& reason, const std::string& engine_name,
+    const std::string& original_filename, const std::string& data) {
 
-                // std::regex
-                bool matched_std = false;
-                if (check_file_signature_std(file_path, pdf_header, 4)) { pdf_count_std++; matched_std = true; }
-                else if (check_file_signature_std(file_path, doc_header, 8)) { docx_count_std++; matched_std = true; }
-                else if (check_file_signature_std(file_path, png_header, 8)) { png_count_std++; matched_std = true; }
-                else if (check_file_signature_std(file_path, rar4_header, 7) ||
-                         check_file_signature_std(file_path, rar5_header, 8)) {
-                    rar_count_std++; matched_std = true;
+    fs::create_directories("debug_samples");
+
+    // [FIX] РЎР°РЅРёС‚РёР·Р°С†РёСЏ РёРјРµРЅРё: Р·Р°РјРµРЅСЏРµРј РґРІРѕРµС‚РѕС‡РёСЏ (std::regex -> std_regex)
+    std::string safe_engine = engine_name;
+    std::replace(safe_engine.begin(), safe_engine.end(), ' ', '_');
+    std::replace(safe_engine.begin(), safe_engine.end(), '.', '_');
+    std::replace(safe_engine.begin(), safe_engine.end(), ':', '_'); // <--- Р’РђР–РќРћ
+
+    std::string filename = safe_engine + "_" + reason + "_" + original_filename;
+    fs::path out_path = fs::path("debug_samples") / filename;
+
+    std::ofstream f(out_path, std::ios::binary);
+    f.write(data.data(), data.size());
+
+    std::cout << "    [SAVED] " << reason << " sample saved to: " << out_path.string() << "\n";
+}
+
+bool is_expected_type(const std::string& ext, const ScanStats& st) {
+    if (ext == ".pdf") return st.pdf > 0;
+    if (ext == ".zip") return st.zip > 0;
+    if (ext == ".rar") return st.rar > 0;
+    if (ext == ".doc") return st.doc > 0;
+    if (ext == ".xls") return st.xls > 0;
+    if (ext == ".ppt") return st.ppt > 0;
+    if (ext == ".docx") return st.docx > 0;
+    if (ext == ".xlsx") return st.xlsx > 0;
+    if (ext == ".pptx") return st.pptx > 0;
+    if (ext == ".png") return st.png > 0;
+    if (ext == ".jpg") return st.jpg > 0;
+    if (ext == ".gif") return st.gif > 0;
+    if (ext == ".bmp") return st.bmp > 0;
+    if (ext == ".mkv") return st.mkv > 0;
+    if (ext == ".mp3") return st.mp3 > 0;
+    if (ext == ".json") return st.json > 0;
+    if (ext == ".html") return st.html > 0;
+    if (ext == ".xml")  return st.xml > 0;
+    if (ext == ".eml")  return st.eml > 0;
+    return false;
+}
+
+void run_benchmark(Scanner* scanner, const fs::path& target, bool is_folder, const GenStats& expected) {
+    ScanStats actual;
+    size_t total_bytes = 0;
+
+    std::cout << "\n>>> Scanning with " << scanner->name() << "..." << std::endl;
+    auto start = std::chrono::high_resolution_clock::now();
+
+    if (is_folder) {
+        for (const auto& entry : fs::directory_iterator(target)) {
+            if (entry.is_regular_file()) {
+                std::string data = read_file(entry.path());
+                if (data.empty()) continue;
+
+                size_t fsize = data.size();
+                total_bytes += fsize;
+
+                ScanStats file_stats;
+                scanner->scan(data.data(), fsize, file_stats);
+
+                // [FIX] РќРѕСЂРјР°Р»РёР·СѓРµРј РїРµСЂРµРґ СЃР»РѕР¶РµРЅРёРµРј (15 matches -> 1 file)
+                ScanStats normalized = normalize_stats(file_stats);
+                actual += normalized;
+
+                // --- РђРќРђР›РР— РћРЁРР‘РћРљ ---
+                std::string ext = entry.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                std::string fname = entry.path().filename().string();
+
+                int distinct_types = count_distinct_types(file_stats);
+
+                // 1. MISS
+                if (distinct_types == 0) {
+                    std::cout << "[DEBUG] MISS: " << fname << " (" << (fsize / 1024) << " KB)\n";
+                    save_debug_sample("MISS", scanner->name(), fname, data);
                 }
-                else { other_count_std++; }
-
+                // 2. FP / MULTI (РќР°С€Р»Рё Р±РѕР»СЊС€Рµ РѕРґРЅРѕРіРѕ Р РђР—РќРћР“Рћ С‚РёРїР°)
+                else if (distinct_types > 1) {
+                    std::cout << "[DEBUG] FP/MULTI: " << fname << " found " << distinct_types << " distinct types!\n";
+                    save_debug_sample("FP_MULTI", scanner->name(), fname, data);
+                }
+                // 3. WRONG TYPE
+                else if (!is_expected_type(ext, file_stats)) {
+                    std::cout << "[DEBUG] WRONG TYPE: " << fname << " (Expected " << ext << ")\n";
+                    save_debug_sample("WRONG_TYPE", scanner->name(), fname, data);
+                }
             }
         }
-        for (const auto& entry : fs::directory_iterator(directory)) {
-            if (fs::is_regular_file(entry)) {
-                const std::string file_path = entry.path().string();
-
-                // RE2
-                bool matched_re2 = false;
-                if (check_file_signature_re2(file_path, pdf_header, 4, opt)) { pdf_count_re2++; matched_re2 = true; }
-                else if (check_file_signature_re2(file_path, doc_header, 8, opt)) { docx_count_re2++; matched_re2 = true; }
-                else if (check_file_signature_re2(file_path, png_header, 8, opt)) { png_count_re2++; matched_re2 = true; }
-                else if (check_file_signature_re2(file_path, rar4_header, 7, opt) ||
-                    check_file_signature_re2(file_path, rar5_header, 8, opt)) {
-                    rar_count_re2++; matched_re2 = true;
-                }
-                else { other_count_re2++; }
-            }
-        }
-        for (const auto& entry : fs::directory_iterator(directory)) {
-            if (fs::is_regular_file(entry)) {
-                const std::string file_path = entry.path().string();
-
-                // Boost.Regex
-                bool matched_boost = false;
-                if (check_file_signature_boost(file_path, pdf_header, 4)) { pdf_count_boost++; matched_boost = true; }
-                else if (check_file_signature_boost(file_path, doc_header, 8)) { docx_count_boost++; matched_boost = true; }
-                else if (check_file_signature_boost(file_path, png_header, 8)) { png_count_boost++; matched_boost = true; }
-                else if (check_file_signature_boost(file_path, rar4_header, 7) ||
-                    check_file_signature_boost(file_path, rar5_header, 8)) {
-                    rar_count_boost++; matched_boost = true;
-                }
-                else { other_count_boost++; }
-            }
-        }
-        for (const auto& entry : fs::directory_iterator(directory)) {
-            if (fs::is_regular_file(entry)) {
-                const std::string file_path = entry.path().string();
-
-                // hyperscan
-                bool matched_hs= false;
-                if (check_file_signature_boost(file_path, pdf_header, 4)) { pdf_count_hs++; matched_hs = true; }
-                else if (check_file_signature_hs(file_path, doc_header, 8)) { docx_count_hs++; matched_hs = true; }
-                else if (check_file_signature_hs(file_path, png_header, 8)) { png_count_hs++; matched_hs = true; }
-                else if (check_file_signature_hs(file_path, rar4_header, 7) ||
-                    check_file_signature_hs(file_path, rar5_header, 8)) {
-                    rar_count_hs++; matched_hs = true;
-                }
-                else { other_count_hs++; }
-            }
-        }
-
     }
-    catch (const fs::filesystem_error& ex) {
-        std::cerr << "Ошибка файловой системы: " << ex.what() << std::endl;
+    else {
+        // Stream mode
+        std::string data = read_file(target);
+        total_bytes += data.size();
+        if (!data.empty()) {
+            scanner->scan(data.data(), total_bytes, actual);
+        }
     }
 
-    // Выводим результаты для каждого движка отдельно
-    std::cout << "===== RE2 Results =====" << std::endl;
-    std::cout << "PDF: " << pdf_count_re2 << "\nDOC: " << docx_count_re2 << "\nPNG: " << png_count_re2
-        << "\nRAR: " << rar_count_re2 << "\nOther: " << other_count_re2 << std::endl;
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    double mb = total_bytes / (1024.0 * 1024.0);
 
-    std::cout << "===== Boost.Regex Results =====" << std::endl;
-    std::cout << "PDF: " << pdf_count_boost << "\nDOC: " << docx_count_boost << "\nPNG: " << png_count_boost
-        << "\nRAR: " << rar_count_boost << "\nOther: " << other_count_boost << std::endl;
+    std::cout << " Time:  " << std::fixed << std::setprecision(3) << diff.count() << " sec ("
+        << (diff.count() > 0 ? mb / diff.count() : 0.0) << " MB/s)\n";
+    std::cout << " Size:  " << mb << " MB\n";
 
-    std::cout << "===== std::regex Results =====" << std::endl;
-    std::cout << "PDF: " << pdf_count_std << "\nDOC: " << docx_count_std << "\nPNG: " << png_count_std
-        << "\nRAR: " << rar_count_std << "\nOther: " << other_count_std << std::endl;
+    auto row = [&](const std::string& n, int exp, int act) {
+        std::string status = (act == exp) ? "OK" : (act < exp ? "MISS" : "FP");
+        std::cout << "| " << std::left << std::setw(12) << n
+            << " | " << std::setw(6) << exp
+            << " | " << std::setw(6) << act
+            << " | " << status << "\n";
+        };
 
-    std::cout << "===== std::HyperScan Results =====" << std::endl;
-    std::cout << "PDF: " << pdf_count_hs << "\nDOC: " << docx_count_hs << "\nPNG: " << png_count_hs
-        << "\nRAR: " << rar_count_hs << "\nOther: " << other_count_hs << std::endl;
+    std::cout << "------------------------------------------\n";
+    std::cout << "| TYPE         | GEN    | FOUND  | STATUS\n";
+    std::cout << "|--------------|--------|--------|-------\n";
+    row("PDF", expected.pdf, actual.pdf);
+    row("ZIP", expected.zip, actual.zip);
+    row("RAR", expected.rar, actual.rar);
+    std::cout << "|--------------|--------|--------|-------\n";
+    row("DOC", expected.doc, actual.doc);
+    row("XLS", expected.xls, actual.xls);
+    row("PPT", expected.ppt, actual.ppt);
+    std::cout << "|--------------|--------|--------|-------\n";
+    row("DOCX", expected.docx, actual.docx);
+    row("XLSX", expected.xlsx, actual.xlsx);
+    row("PPTX", expected.pptx, actual.pptx);
+    std::cout << "|--------------|--------|--------|-------\n";
+    row("PNG", expected.png, actual.png);
+    row("JPG", expected.jpg, actual.jpg);
+    row("GIF", expected.gif, actual.gif);
+    row("BMP", expected.bmp, actual.bmp);
+    std::cout << "|--------------|--------|--------|-------\n";
+    row("MKV", expected.mkv, actual.mkv);
+    row("MP3", expected.mp3, actual.mp3);
+    std::cout << "|--------------|--------|--------|-------\n";
+    row("JSON", expected.json, actual.json);
+    row("HTML", expected.html, actual.html);
+    row("XML", expected.xml, actual.xml);
+    row("EML", expected.eml, actual.eml);
+    std::cout << "|--------------|--------|--------|-------\n";
+
+    // [FIX] РЎСѓРјРјРёСЂСѓРµРј РЅР°Р№РґРµРЅРЅС‹Рµ С„Р°Р№Р»С‹, Р° РЅРµ РІСЃРµ СЃРѕРІРїР°РґРµРЅРёСЏ
+    row("TOTAL MATCH", expected.total_files, sum_files_found(actual));
+    std::cout << "------------------------------------------\n";
 }
 
-int main() {
-    re2::RE2::Options options;
-    options.set_encoding(re2::RE2::Options::EncodingLatin1);
-    std::string directory = R"(C:\projects\test_auto\data)"; // путь к папке с файлами для теста
+void print_usage() {
+    std::cout << "Usage: ScanerApp [mode] [amount] [mix]\n";
+    std::cout << "  mode: folder, bin, pcap, zip\n";
+    std::cout << "  amount: number of files (e.g. 1000) OR size in MB (e.g. 100mb)\n";
+    std::cout << "  mix: 0.0 - 1.0 (probability of gluing files)\n";
+    std::cout << "Example: ScanerApp zip 500mb 0.2\n";
+}
 
-    try {
-        if (!fs::exists(directory)) {
-            std::cerr << "Директория не существует: " << directory << std::endl;
-            return 1;
-        }
-        if (!fs::is_directory(directory)) {
-            std::cerr << "Путь не является директорией: " << directory << std::endl;
-            return 1;
-        }
-        count_files(directory, options);
+int main(int argc, char* argv[]) {
+    std::string amount_str = "10";
+    double mix = 0.0;
+    OutputMode mode = OutputMode::BIN;
+
+    std::string out_base_name = "dataset";
+    fs::path out_path;
+
+    if (argc > 1) {
+        std::string m = argv[1];
+        std::transform(m.begin(), m.end(), m.begin(), ::tolower);
+
+        if (m == "bin") mode = OutputMode::BIN;
+        else if (m == "pcap") mode = OutputMode::PCAP;
+        else if (m == "zip") mode = OutputMode::ZIP;
+        else if (m == "folder") mode = OutputMode::FOLDER;
+        else { print_usage(); return 1; }
     }
-    catch (const std::exception& ex) {
-        std::cerr << "Ошибка: " << ex.what() << std::endl;
-        return 1;
+    if (argc > 2) amount_str = argv[2];
+    if (argc > 3) mix = std::stod(argv[3]);
+
+    if (mode == OutputMode::FOLDER) out_path = out_base_name + "_dir";
+    else if (mode == OutputMode::ZIP) out_path = out_base_name + ".zip";
+    else if (mode == OutputMode::PCAP) out_path = out_base_name + ".pcap";
+    else out_path = out_base_name + ".bin";
+
+    bool use_mb = false;
+    int limit_val = 0;
+    size_t mb_pos = amount_str.find("mb");
+    if (mb_pos == std::string::npos) mb_pos = amount_str.find("MB");
+
+    if (mb_pos != std::string::npos) {
+        use_mb = true;
+        limit_val = std::stoi(amount_str.substr(0, mb_pos));
     }
+    else {
+        limit_val = std::stoi(amount_str);
+    }
+
+    std::cout << "=== Regex Benchmark Tool ===\n";
+    std::cout << "Mode:      " << (mode == OutputMode::FOLDER ? "FOLDER" : "STREAM") << "\n";
+    std::cout << "Output:    " << fs::absolute(out_path) << "\n\n";
+
+    // 1. Generate
+    DataSetGenerator gen;
+    GenStats expected;
+    if (use_mb) expected = gen.generate_size(out_path, limit_val, mode, mix);
+    else expected = gen.generate_count(out_path, limit_val, mode, mix);
+
+    // Р’С‹РІРѕРґ СЃС‚Р°С‚РёСЃС‚РёРєРё
+    std::cout << "Generated Breakdown:\n";
+    auto print_stat = [](const char* name, int count) {
+        if (count > 0) std::cout << "  " << std::left << std::setw(6) << name << ": " << count << "\n";
+        };
+    print_stat("PDF", expected.pdf); print_stat("ZIP", expected.zip);
+    print_stat("DOC", expected.doc); print_stat("XLS", expected.xls);
+    print_stat("DOCX", expected.docx); print_stat("XLSX", expected.xlsx); print_stat("PPTX", expected.pptx);
+    print_stat("JSON", expected.json); print_stat("XML", expected.xml);
+    print_stat("PNG", expected.png); print_stat("JPG", expected.jpg);
+    print_stat("MKV", expected.mkv); print_stat("MP3", expected.mp3);
+    std::cout << "  TOTAL:  " << expected.total_files << " files\n";
+
+    // 2. Engines
+    std::vector<std::unique_ptr<Scanner>> scanners;
+    scanners.push_back(std::make_unique<StdScanner>(false));
+    scanners.push_back(std::make_unique<BoostScanner>(false));
+
+    scanners.push_back(std::make_unique<Re2Scanner>());
+    auto hs = std::make_unique<HsScanner>();
+    hs->prepare();
+    scanners.push_back(std::move(hs));
+
+    // 3. Run
+    for (const auto& s : scanners) {
+        run_benchmark(s.get(), out_path, mode == OutputMode::FOLDER, expected);
+    }
+
     return 0;
 }
