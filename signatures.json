@@ -79,7 +79,7 @@
         "name": "PPT",
         "type": "binary",
         "hex_head": "D0CF11E0A1B11AE1",
-        "text_pattern": "PowerPoint",
+        "text_pattern": "PowerPoint Document",
         "deduct_from": "OLE"
     },
 

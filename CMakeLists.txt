@@ -97,3 +97,22 @@ target_link_libraries(DevScanTests PRIVATE
 # Регистрация тестов в CTest
 include(GoogleTest)
 gtest_discover_tests(DevScanTests)
+
+# === 6. БЕНЧМАРКИ (BENCHMARKS) ===
+find_package(benchmark CONFIG REQUIRED)
+
+add_executable(DevScanBenchmarks
+    tests/Benchmarks.cpp
+    src/generator/Generator.cpp
+)
+
+target_include_directories(DevScanBenchmarks PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/include/generator"
+)
+
+target_link_libraries(DevScanBenchmarks PRIVATE
+    DevScanCore
+    benchmark::benchmark
+    Boost::iostreams
+)

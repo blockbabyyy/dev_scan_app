@@ -44,6 +44,7 @@ public:
                     def.type = SignatureType::BINARY;
                     if (item.contains("hex_head")) def.hex_head = item["hex_head"].get<std::string>();
                     if (item.contains("hex_tail")) def.hex_tail = item["hex_tail"].get<std::string>();
+                    if (item.contains("text_pattern")) def.text_pattern = item["text_pattern"].get<std::string>();
                 }
 
                 // [ВАЖНО] Читаем поле для коррекции коллизий

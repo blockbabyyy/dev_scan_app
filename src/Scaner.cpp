@@ -7,14 +7,21 @@
 #include <hs/hs.h>
 
 namespace {
-    // [FIX] Правильное экранирование: для C++ строки "\x" нужно писать "\\x"
     std::string hex_to_regex_str(const std::string& hex) {
         if (hex.empty()) return "";
+        if (hex.length() % 2 != 0) {
+            std::cerr << "[Scanner] Warning: odd-length hex string '" << hex
+                      << "', last nibble dropped\n";
+        }
         std::ostringstream ss;
-        for (size_t i = 0; i < hex.length(); i += 2) {
-            if (i + 1 < hex.length()) {
-                ss << "\\x" << hex.substr(i, 2);
+        for (size_t i = 0; i + 1 < hex.length(); i += 2) {
+            char c1 = hex[i], c2 = hex[i + 1];
+            if (!std::isxdigit(static_cast<unsigned char>(c1)) ||
+                !std::isxdigit(static_cast<unsigned char>(c2))) {
+                std::cerr << "[Scanner] Warning: non-hex chars at pos " << i
+                          << " in '" << hex << "'\n";
             }
+            ss << "\\x" << c1 << c2;
         }
         return ss.str();
     }
@@ -51,7 +58,10 @@ void BoostScanner::prepare(const std::vector<SignatureDefinition>& sigs) {
             if (s.type == SignatureType::TEXT) flags |= boost::regex::icase;
             m_regexes.emplace_back(boost::regex(build_pattern(s), flags), s.name);
         }
-        catch (...) {}
+        catch (const std::exception& e) {
+            std::cerr << "[BoostScanner] Failed to compile pattern for '"
+                      << s.name << "': " << e.what() << "\n";
+        }
     }
 }
 void BoostScanner::scan(const char* data, size_t size, ScanStats& stats) {
@@ -95,6 +105,7 @@ HsScanner::~HsScanner() {
 }
 std::string HsScanner::name() const { return "Hyperscan"; }
 void HsScanner::prepare(const std::vector<SignatureDefinition>& sigs) {
+    if (scratch) { hs_free_scratch(scratch); scratch = nullptr; }
     if (db) { hs_free_database(db); db = nullptr; }
     m_temp_patterns.clear(); m_sig_names.clear();
     m_temp_patterns.reserve(sigs.size());

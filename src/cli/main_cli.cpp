@@ -1,15 +1,13 @@
 ﻿#include <iostream>
 #include <filesystem>
-#include <fstream>
 #include <vector>
 #include <string>
 #include <iomanip>
-#include <nlohmann/json.hpp>
 #include <boost/iostreams/device/mapped_file.hpp>
 #include "Scaner.h"
+#include "ConfigLoader.h"
 
 namespace fs = std::filesystem;
-using json = nlohmann::json;
 
 // Функция вывода HELP интерфейса
 void print_ui_help() {
@@ -37,41 +35,7 @@ void print_ui_help() {
         << "==================================================================\n";
 }
 
-// Загрузка конфигурации
-std::vector<SignatureDefinition> load_signatures(const std::string& path) {
-    std::vector<SignatureDefinition> sigs;
-    std::ifstream f(path);
-    if (!f.is_open()) {
-        std::cerr << "[Error] Не удалось найти файл конфигурации: " << path << "\n";
-        return sigs;
-    }
-
-    try {
-        json j;
-        f >> j;
-        for (auto& item : j) {
-            SignatureDefinition def;
-            def.name = item.at("name").get<std::string>();
-            std::string type = item.value("type", "binary");
-            def.type = (type == "text") ? SignatureType::TEXT : SignatureType::BINARY;
-
-            if (def.type == SignatureType::BINARY) {
-                def.hex_head = item.value("hex_head", "");
-                def.hex_tail = item.value("hex_tail", "");
-                def.text_pattern = item.value("text_pattern", "");
-            }
-            else {
-                def.text_pattern = item.at("pattern").get<std::string>();
-            }
-            def.deduct_from = item.value("deduct_from", "");
-            sigs.push_back(def);
-        }
-    }
-    catch (const std::exception& e) {
-        std::cerr << "[Error] Ошибка парсинга JSON: " << e.what() << "\n";
-    }
-    return sigs;
-}
+// Загрузка конфигурации — делегируем ConfigLoader
 
 // Логика вычитания DOCX из ZIP и т.д.
 void apply_deduction(ScanStats& stats, const std::vector<SignatureDefinition>& sigs) {
@@ -108,7 +72,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    auto sigs = load_signatures(config_path);
+    auto sigs = ConfigLoader::load(config_path);
     if (sigs.empty()) return 1;
 
     auto scanner = Scanner::create(engine_choice);
@@ -117,28 +81,36 @@ int main(int argc, char* argv[]) {
     ScanStats results;
     std::cout << "[Info] Сканирование: " << target_path << " движком " << scanner->name() << "...\n";
 
+    auto scan_one_file = [&](const fs::path& p) {
+        try {
+            auto fsize = fs::file_size(p);
+            if (fsize == 0) return; // пустые файлы пропускаем
+            boost::iostreams::mapped_file_source mmap(p.string());
+            if (mmap.is_open()) {
+                scanner->scan(mmap.data(), mmap.size(), results);
+                results.total_files_processed++;
+            }
+        }
+        catch (const std::exception& e) {
+            std::cerr << "[Warning] Пропуск файла " << p << ": " << e.what() << "\n";
+        }
+    };
+
     try {
         if (fs::is_directory(target_path)) {
-            for (auto const& entry : fs::recursive_directory_iterator(target_path)) {
-                if (entry.is_regular_file()) {
-                    boost::iostreams::mapped_file_source mmap(entry.path().string());
-                    if (mmap.is_open()) {
-                        scanner->scan(mmap.data(), mmap.size(), results);
-                        results.total_files_processed++;
-                    }
-                }
+            // skip_permission_denied + follow_directory_symlink отключен (защита от циклов)
+            auto opts = fs::directory_options::skip_permission_denied;
+            for (auto const& entry : fs::recursive_directory_iterator(target_path, opts)) {
+                if (entry.is_regular_file() && !entry.is_symlink())
+                    scan_one_file(entry.path());
             }
         }
         else if (fs::exists(target_path)) {
-            boost::iostreams::mapped_file_source mmap(target_path);
-            if (mmap.is_open()) {
-                scanner->scan(mmap.data(), mmap.size(), results);
-                results.total_files_processed = 1;
-            }
+            scan_one_file(target_path);
         }
     }
     catch (const std::exception& e) {
-        std::cerr << "[Fatal] Ошибка доступа к файлам: " << e.what() << "\n";
+        std::cerr << "[Fatal] Ошибка обхода директории: " << e.what() << "\n";
     }
 
     apply_deduction(results, sigs);

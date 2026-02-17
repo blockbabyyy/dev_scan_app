@@ -1,4 +1,5 @@
 ﻿#include "generator/Generator.h"
+#include "TypeMap.h"
 #include <iostream>
 #include <sstream>
 #include <random>
@@ -210,26 +211,8 @@ std::pair<std::string, std::string> DataSetGenerator::create_payload(std::mt1993
 }
 
 void DataSetGenerator::update_stats(const std::string& ext, GenStats& stats) {
-    if (ext == ".pdf") stats.add("PDF");
-    else if (ext == ".zip") stats.add("ZIP");
-    else if (ext == ".rar") stats.add("RAR");
-    else if (ext == ".png") stats.add("PNG");
-    else if (ext == ".jpg") stats.add("JPG");
-    else if (ext == ".gif") stats.add("GIF");
-    else if (ext == ".bmp") stats.add("BMP");
-    else if (ext == ".mkv") stats.add("MKV");
-    else if (ext == ".mp3") stats.add("MP3");
-    else if (ext == ".doc") stats.add("DOC");
-    else if (ext == ".xls") stats.add("XLS");
-    else if (ext == ".ppt") stats.add("PPT");
-    else if (ext == ".docx") stats.add("DOCX");
-    else if (ext == ".xlsx") stats.add("XLSX");
-    else if (ext == ".pptx") stats.add("PPTX");
-    else if (ext == ".json") stats.add("JSON");
-    else if (ext == ".html") stats.add("HTML");
-    else if (ext == ".xml") stats.add("XML");
-    else if (ext == ".eml") stats.add("EMAIL");
-
+    std::string type = ext_to_type(ext);
+    if (!type.empty()) stats.add(type);
     stats.total_files_processed++;
 }
 
