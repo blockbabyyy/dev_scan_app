@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <filesystem>
 #include <vector>
 #include <string>
@@ -6,6 +6,8 @@
 #include <boost/iostreams/device/mapped_file.hpp>
 #include "Scaner.h"
 #include "ConfigLoader.h"
+#include "Logger.h"
+#include "ReportWriter.h"
 
 namespace fs = std::filesystem;
 
@@ -52,6 +54,9 @@ void apply_deduction(ScanStats& stats, const std::vector<SignatureDefinition>& s
 }
 
 int main(int argc, char* argv[]) {
+    Logger::init();
+    Logger::info("DevScan запущен");
+
     if (argc < 2) {
         print_ui_help();
         return 0;
@@ -72,14 +77,20 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    Logger::info("Загрузка конфигурации: " + config_path);
     auto sigs = ConfigLoader::load(config_path);
-    if (sigs.empty()) return 1;
+    if (sigs.empty()) {
+        Logger::error("Не удалось загрузить сигнатуры из " + config_path);
+        return 1;
+    }
+    Logger::info("Загружено сигнатур: " + std::to_string(sigs.size()));
 
     auto scanner = Scanner::create(engine_choice);
     scanner->prepare(sigs);
 
     ScanStats results;
     std::cout << "[Info] Сканирование: " << target_path << " движком " << scanner->name() << "...\n";
+    Logger::info("Начало сканирования: " + target_path + " движком " + scanner->name());
 
     auto scan_one_file = [&](const fs::path& p) {
         try {
@@ -92,7 +103,7 @@ int main(int argc, char* argv[]) {
             }
         }
         catch (const std::exception& e) {
-            std::cerr << "[Warning] Пропуск файла " << p << ": " << e.what() << "\n";
+            Logger::warn("Пропуск файла " + p.string() + ": " + e.what());
         }
     };
 
@@ -110,10 +121,11 @@ int main(int argc, char* argv[]) {
         }
     }
     catch (const std::exception& e) {
-        std::cerr << "[Fatal] Ошибка обхода директории: " << e.what() << "\n";
+        Logger::error("Ошибка обхода директории: " + std::string(e.what()));
     }
 
     apply_deduction(results, sigs);
+    Logger::info("Сканирование завершено. Файлов обработано: " + std::to_string(results.total_files_processed));
 
     // Вывод итоговой таблицы
     std::cout << "\n--- РЕЗУЛЬТАТЫ СКАНЕРА ---\n";
@@ -126,6 +138,18 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "--------------------------\n";
     std::cout << "Всего файлов обработано: " << results.total_files_processed << "\n";
+
+    // Экспорт отчётов в crash_report/
+    fs::path report_dir = "crash_report";
+    fs::create_directories(report_dir);
+    std::string json_path = (report_dir / "report.json").string();
+    std::string txt_path  = (report_dir / "report.txt").string();
+    ReportWriter::write_json(json_path, results, target_path, scanner->name());
+    ReportWriter::write_txt(txt_path, results, target_path, scanner->name());
+    Logger::info("Отчёты сохранены: " + json_path + ", " + txt_path);
+
+    std::cout << "\n[Отчёты] " << json_path << ", " << txt_path << "\n";
+    std::cout << "[Лог]    " << Logger::path() << "\n";
 
     return 0;
 }

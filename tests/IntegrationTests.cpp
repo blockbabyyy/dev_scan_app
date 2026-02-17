@@ -83,3 +83,35 @@ TEST_F(IntegrationTest, Zip_Archive_Internal_Scan) {
     // ZIP-паттерн с head+tail (PK0304...PK0506) — считает ZIP-структуры, не записи
     EXPECT_GE(GetCount(actual, "ZIP"), 1) << "ZIP archive not detected at all";
 }
+
+TEST_F(IntegrationTest, Bin_Concat_Scan) {
+    DataSetGenerator gen;
+    fs::path bin_path = temp_dir / "concat_test.bin";
+    GenStats expected = gen.generate_count(bin_path, 30, OutputMode::BIN, 0.0);
+    ScanStats actual = ScanPath(bin_path);
+
+    std::cout << "--- BIN Scan Report ---\n";
+    for (auto const& [name, count] : actual.counts) std::cout << name << ": " << count << "\n";
+
+    for (auto const& [type_name, count] : expected.counts) {
+        if (count == 0) continue;
+        EXPECT_GE(GetCount(actual, type_name), 1)
+            << "Not found in BIN: " << type_name;
+    }
+}
+
+TEST_F(IntegrationTest, Pcap_Dump_Scan) {
+    DataSetGenerator gen;
+    fs::path pcap_path = temp_dir / "dump_test.pcap";
+    GenStats expected = gen.generate_count(pcap_path, 30, OutputMode::PCAP, 0.0);
+    ScanStats actual = ScanPath(pcap_path);
+
+    std::cout << "--- PCAP Scan Report ---\n";
+    for (auto const& [name, count] : actual.counts) std::cout << name << ": " << count << "\n";
+
+    for (auto const& [type_name, count] : expected.counts) {
+        if (count == 0) continue;
+        EXPECT_GE(GetCount(actual, type_name), 1)
+            << "Not found in PCAP: " << type_name;
+    }
+}
