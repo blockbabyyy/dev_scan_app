@@ -5,11 +5,12 @@
 ## Возможности
 
 - **Три движка сканирования**: [Hyperscan](https://github.com/intel/hyperscan) (по умолчанию), [RE2](https://github.com/google/re2), [Boost.Regex](https://www.boost.org/doc/libs/release/libs/regex/)
-- **21 тип файлов** из коробки (PDF, ZIP, RAR4/5, PNG, JPG, GIF, BMP, MKV, MP3, OLE, DOC, XLS, PPT, DOCX, XLSX, PPTX, JSON, HTML, XML, EMAIL)
+- **27 типов файлов** из коробки (PDF, ZIP, RAR4/5, PNG, JPG, GIF, BMP, MKV, MP3, OLE, DOC, XLS, PPT, DOCX, XLSX, PPTX, JSON, HTML, XML, EMAIL, 7Z, GZIP, PE, SQLITE, FLAC, WAV)
 - **Коррекция коллизий** — DOCX/XLSX/PPTX автоматически вычитаются из ZIP, DOC/XLS/PPT из OLE
 - **Конфигурируемые сигнатуры** — добавляйте свои типы через `signatures.json`
 - **Экспорт результатов** — отчёты в JSON и TXT (`crash_report/report.json`, `crash_report/report.txt`)
 - **Логирование** — лог-файл в `crash_report/devscan_YYYYMMDD_HHMMSS.log`
+- **Многопоточность** — по умолчанию используются все ядра процессора
 - **Бенчмарки** — сравнение производительности движков на сгенерированных датасетах
 
 ## Структура проекта
@@ -17,24 +18,24 @@
 ```
 DevScan/
 ├── include/
-│   ├── Scaner.h            # Интерфейс Scanner + движки (Boost, RE2, Hyperscan)
+│   ├── Scanner.h           # Интерфейс Scanner + движки (Boost, RE2, Hyperscan)
 │   ├── ConfigLoader.h      # Загрузка сигнатур из JSON
-│   ├── TypeMap.h            # Маппинг расширений -> имён типов
-│   ├── Logger.h             # Логгер (crash_report/)
-│   ├── ReportWriter.h       # Экспорт результатов (JSON/TXT)
+│   ├── TypeMap.h           # Маппинг расширений -> имён типов
+│   ├── Logger.h            # Логгер (crash_report/)
+│   ├── ReportWriter.h      # Экспорт результатов (JSON/TXT)
 │   └── generator/
-│       └── Generator.h      # Генератор тестовых датасетов
+│       └── Generator.h     # Генератор тестовых датасетов
 ├── src/
-│   ├── Scaner.cpp           # Реализации движков
+│   ├── Scanner.cpp         # Реализации движков + apply_deduction
 │   ├── cli/
-│   │   └── main_cli.cpp     # CLI-приложение
+│   │   └── main_cli.cpp    # CLI-приложение
 │   └── generator/
-│       └── Generator.cpp    # Реализация генератора
+│       └── Generator.cpp   # Реализация генератора
 ├── tests/
-│   ├── ScanerTests.cpp      # Юнит-тесты (12 тестов, 3 движка x 4 кейса)
-│   ├── IntegrationTests.cpp # Интеграционные тесты (Folder, ZIP, BIN, PCAP)
-│   └── Benchmarks.cpp       # Бенчмарки производительности
-├── signatures.json          # База сигнатур
+│   ├── ScannerTests.cpp    # Юнит-тесты (45 тестов)
+│   ├── IntegrationTests.cpp# Интеграционные тесты (Folder, ZIP, BIN, PCAP)
+│   └── Benchmarks.cpp      # Бенчмарки производительности
+├── signatures.json         # База сигнатур
 └── CMakeLists.txt
 ```
 
@@ -66,7 +67,16 @@ cmake --build . --config Release
 | `DevScanTests` | Юнит- и интеграционные тесты (GTest) |
 | `DevScanBenchmarks` | Бенчмарки (Google Benchmark) |
 
+> `signatures.json` автоматически копируется в build-директорию при каждом изменении.
+
 ## Использование
+
+### Справка
+
+```bash
+DevScanApp.exe --help
+DevScanApp.exe --version
+```
 
 ### Базовый запуск
 
@@ -74,40 +84,44 @@ cmake --build . --config Release
 DevScanApp.exe <путь_к_папке_или_файлу>
 ```
 
-### С параметрами
+### Все опции
 
 ```bash
-DevScanApp.exe C:/data -c my_sigs.json -e re2
+DevScanApp.exe C:/data -e re2 -j 8 --output-json report.json
 ```
 
 | Опция | Описание |
 |---|---|
 | `-c, --config <file>` | Путь к файлу сигнатур (по умолчанию: `signatures.json`) |
-| `-e, --engine <type>` | Движок: `hs` (Hyperscan), `re2`, `boost` |
+| `-e, --engine <type>` | Движок: `hs` (Hyperscan, по умолчанию), `re2`, `boost` |
+| `-j, --threads <N>` | Количество потоков (по умолчанию: число ядер CPU) |
+| `-m, --max-filesize <MB>` | Максимальный размер файла в МБ (по умолчанию: 512) |
+| `--output-json <path>` | Сохранить JSON-отчёт по указанному пути |
+| `--output-txt <path>` | Сохранить TXT-отчёт по указанному пути |
+| `--no-report` | Не генерировать отчёты |
 
 ### Вывод
 
 После сканирования программа:
 1. Выводит таблицу результатов в stdout
-2. Сохраняет `crash_report/report.json` и `crash_report/report.txt`
+2. Сохраняет `crash_report/report.json` и `crash_report/report.txt` (если не указано `--no-report`)
 3. Пишет лог в `crash_report/devscan_YYYYMMDD_HHMMSS.log`
 
 Пример вывода:
 
 ```
-[Info] Сканирование: C:/data движком Hyperscan...
+[Info] Scanning: C:/data (150 files, 8 threads, engine: Hyperscan)
 
---- РЕЗУЛЬТАТЫ СКАНЕРА ---
-Тип файла       | Найдено
+--- SCAN RESULTS ---
+Type            | Count
 --------------------------
 PDF             | 10
 ZIP             | 5
 DOC             | 3
 --------------------------
-Всего файлов обработано: 150
-
-[Отчёты] crash_report/report.json, crash_report/report.txt
-[Лог]    crash_report/devscan_20260217_143052.log
+Files processed: 150  (1.23s)
+[Reports] crash_report/report.json, crash_report/report.txt
+[Log]     crash_report/devscan_20260223_143052.log
 ```
 
 ### Формат report.json
@@ -127,7 +141,7 @@ DOC             | 3
 
 ## Сигнатуры
 
-Сигнатуры хранятся в `signatures.json`. Каждая запись содержит:
+Сигнатуры хранятся в `signatures.json`. Каждая запись:
 
 | Поле | Тип | Описание |
 |---|---|---|
@@ -135,8 +149,8 @@ DOC             | 3
 | `type` | string | `"binary"` или `"text"` |
 | `hex_head` | string | Magic bytes начала файла (HEX) |
 | `hex_tail` | string | Magic bytes конца файла (HEX, опционально) |
-| `pattern` | string | Regex-паттерн для текстовых сигнатур |
-| `text_pattern` | string | Дополнительный текстовый якорь для бинарных сигнатур |
+| `text_pattern` | string | Дополнительный regex-якорь для бинарных сигнатур |
+| `pattern` | string | Regex-паттерн для текстовых сигнатур (`type: "text"`) |
 | `deduct_from` | string | Тип-родитель для вычитания коллизий (опционально) |
 
 ### Пример: бинарная сигнатура
@@ -146,8 +160,7 @@ DOC             | 3
   "name": "MY_FORMAT",
   "type": "binary",
   "hex_head": "4D5A",
-  "hex_tail": "00000000",
-  "deduct_from": "ZIP"
+  "hex_tail": "00000000"
 }
 ```
 
@@ -163,13 +176,13 @@ DOC             | 3
 
 ### Механизм вычитания (deduct_from)
 
-Некоторые форматы являются подмножествами других (DOCX это ZIP с определённой структурой, DOC это OLE). Поле `deduct_from` автоматически корректирует счётчик родительского типа:
+Некоторые форматы являются подмножествами других (DOCX — это ZIP с определённой структурой, DOC — это OLE с маркером `WordDocument`). Поле `deduct_from` автоматически корректирует счётчик родительского типа:
 
 ```
-ZIP: 15  (до коррекции)
-DOCX: 5, XLSX: 3, PPTX: 2  (deduct_from: ZIP)
-ZIP: 5   (после коррекции: 15 - 5 - 3 - 2 = 5)
+ZIP: 15  → после коррекции: 15 - 5(DOCX) - 3(XLSX) - 2(PPTX) = 5
 ```
+
+> Вычитание однопроходное (плоское). Транзитивные цепочки не поддерживаются.
 
 ## Тесты
 
@@ -181,15 +194,35 @@ ZIP: 5   (после коррекции: 15 - 5 - 3 - 2 = 5)
 ctest --test-dir build
 ```
 
-### Набор тестов (16 тестов)
+### Набор тестов (45 тестов)
 
-**Юнит-тесты** (12 = 3 движка x 4 кейса):
-- `Detection_PDF` — детекция PDF по head + tail
-- `Detection_ZIP` — детекция ZIP по head
-- `Office_Vs_Zip_No_Deduction` — DOCX внутри ZIP без вычитания
-- `Empty_Data` — пустой ввод
+**ScannerTest** — типизированные тесты, запускаются на всех трёх движках (3 × 7 = 21):
 
-**Интеграционные тесты** (4):
+| Тест | Описание |
+|---|---|
+| `Detection_PDF` | Детекция PDF по head + tail |
+| `Detection_ZIP` | Детекция ZIP по head |
+| `Office_ZIP_And_DOCX_Both_Detected` | DOCX и ZIP одновременно детектируются до вычитания |
+| `Empty_Data` | Пустой буфер не даёт совпадений |
+| `Single_Byte` | Один байт не даёт совпадений |
+| `All_Zeros` | Буфер из нулей не даёт ложных срабатываний |
+| `Multiple_PDF_In_Same_Buffer` | Несколько PDF в одном буфере считаются корректно |
+
+**FalsePositiveTest** — тесты на ложные срабатывания, все движки (3 × 3 = 9):
+
+| Тест | Описание |
+|---|---|
+| `BMP_No_FP_On_Plain_BM` | "BM" без нулевых байт не детектируется как BMP |
+| `Email_No_FP_On_Lone_From` | Одиночный "From:" без заголовков не даёт EMAIL |
+| `Email_Positive_With_Headers` | Полноценные заголовки детектируются как EMAIL |
+
+**DeductionTest** (2):
+- `DOCX_Deducted_From_ZIP` — вычитание DOCX из ZIP корректно
+- `Deduction_Does_Not_Go_Negative` — вычитание не уходит в отрицательные значения
+
+**ConfigLoaderTest** (9): загрузка валидных/невалидных конфигов, обработка ошибок.
+
+**IntegrationTest** (4):
 - `Folder_Scan_With_Generator` — генерация папки с 50 файлами, проверка всех типов
 - `Zip_Archive_Internal_Scan` — генерация ZIP-архива, детекция ZIP-структуры
 - `Bin_Concat_Scan` — генерация бинарной склейки (30 файлов), проверка всех типов
@@ -201,11 +234,38 @@ ctest --test-dir build
 ./DevScanBenchmarks
 ```
 
-Сравнивает производительность Hyperscan, RE2 и Boost.Regex на сгенерированных датасетах разных режимов (FOLDER, BIN, PCAP).
+Запускает сравнение Hyperscan, RE2 и Boost.Regex на датасете из 50 файлов (mix=0.2) в режимах 1 и 8 потоков. Перед бенчмарком выводится таблица точности детекции по каждому движку.
+
+## Архитектура
+
+### Иерархия Scanner
+
+```
+Scanner (abstract)
+├── BoostScanner   — Boost.Regex, однопоточный
+├── Re2Scanner     — Google RE2, двухфазный (Set-filter + счёт)
+└── HsScanner      — Intel Hyperscan, BLOCK-mode
+                     ⚠ не потокобезопасен: каждый поток создаёт свой экземпляр
+```
+
+Создание движка:
+```cpp
+auto scanner = Scanner::create(EngineType::HYPERSCAN);
+scanner->prepare(sigs);
+scanner->scan(data, size, stats);
+apply_deduction(stats, sigs); // из Scanner.h
+```
+
+### Формат ScanStats
+
+```cpp
+struct ScanStats {
+    std::map<std::string, int> counts;   // тип -> количество
+    int total_files_processed = 0;
+};
+```
 
 ## Логирование
-
-Логгер автоматически инициализируется при запуске `DevScanApp`. Все события пишутся в файл `crash_report/devscan_YYYYMMDD_HHMMSS.log`:
 
 | Уровень | Файл | stderr |
 |---|---|---|
@@ -216,10 +276,10 @@ ctest --test-dir build
 Формат строки лога:
 
 ```
-[2026-02-17 14:30:52] [INFO] DevScan запущен
-[2026-02-17 14:30:52] [INFO] Загрузка конфигурации: signatures.json
-[2026-02-17 14:30:52] [WARN] Пропуск файла C:/data/locked.bin: permission denied
-[2026-02-17 14:30:53] [INFO] Сканирование завершено. Файлов обработано: 150
+[2026-02-23 14:30:52] [INFO] DevScan started
+[2026-02-23 14:30:52] [INFO] Loading config: signatures.json
+[2026-02-23 14:30:52] [WARN] Skipped: C:/data/locked.bin: permission denied
+[2026-02-23 14:30:53] [INFO] Scan complete. Files: 150, time: 1.23s
 ```
 
 ## Лицензия
