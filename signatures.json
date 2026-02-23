@@ -4,73 +4,96 @@
         "type": "binary",
         "extensions": [".pdf"],
         "hex_head": "25504446",
-        "hex_tail": "2525454F46"
+        "hex_tail": "2525454F46",
+        "priority": 5,
+        "min_file_size": 64
     },
     {
         "name": "ZIP",
         "type": "binary",
         "extensions": [".zip"],
         "hex_head": "504B0304",
-        "hex_tail": "504B0506"
+        "hex_tail": "504B0506",
+        "priority": 1,
+        "min_file_size": 22
     },
     {
         "name": "RAR4",
         "type": "binary",
         "extensions": [".rar"],
-        "hex_head": "526172211A0700"
+        "hex_head": "526172211A0700",
+        "priority": 15,
+        "min_file_size": 32,
+        "exclusive_with": ["RAR5"]
     },
     {
         "name": "RAR5",
         "type": "binary",
-        "extensions": [".rar5"],
-        "hex_head": "526172211A070100"
+        "extensions": [".rar"],
+        "hex_head": "526172211A070100",
+        "priority": 14,
+        "min_file_size": 32
     },
     {
         "name": "PNG",
         "type": "binary",
         "extensions": [".png"],
         "hex_head": "89504E470D0A1A0A",
-        "hex_tail": "49454E44AE426082"
+        "hex_tail": "49454E44AE426082",
+        "priority": 8,
+        "min_file_size": 33
     },
     {
         "name": "JPG",
         "type": "binary",
         "extensions": [".jpg"],
         "hex_head": "FFD8FF",
-        "hex_tail": "FFD9"
+        "hex_tail": "FFD9",
+        "priority": 5,
+        "min_file_size": 200
     },
     {
         "name": "GIF",
         "type": "binary",
         "extensions": [".gif"],
         "hex_head": "47494638",
-        "hex_tail": "3B"
+        "hex_tail": "3B",
+        "priority": 5,
+        "min_file_size": 26
     },
     {
         "name": "BMP",
         "type": "binary",
         "extensions": [".bmp"],
         "hex_head": "424D",
-        "hex_tail": "00000000"
+        "hex_tail": "00000000",
+        "priority": 3,
+        "min_file_size": 100
     },
     {
         "name": "MKV",
         "type": "binary",
         "extensions": [".mkv"],
-        "hex_head": "1A45DFA3"
+        "hex_head": "1A45DFA3",
+        "priority": 5,
+        "min_file_size": 100
     },
     {
         "name": "MP3",
         "type": "binary",
         "extensions": [".mp3"],
-        "hex_head": "494433"
+        "hex_head": "494433",
+        "priority": 3,
+        "min_file_size": 10000
     },
 
     {
         "name": "OLE",
         "type": "binary",
         "extensions": [],
-        "hex_head": "D0CF11E0A1B11AE1"
+        "hex_head": "D0CF11E0A1B11AE1",
+        "priority": 1,
+        "min_file_size": 512
     },
 
     {
@@ -79,7 +102,9 @@
         "extensions": [".doc"],
         "hex_head": "D0CF11E0A1B11AE1",
         "text_pattern": "WordDocument",
-        "deduct_from": "OLE"
+        "deduct_from": "OLE",
+        "priority": 8,
+        "min_file_size": 4096
     },
     {
         "name": "XLS",
@@ -87,7 +112,9 @@
         "extensions": [".xls"],
         "hex_head": "D0CF11E0A1B11AE1",
         "text_pattern": "Workbook",
-        "deduct_from": "OLE"
+        "deduct_from": "OLE",
+        "priority": 8,
+        "min_file_size": 4096
     },
     {
         "name": "PPT",
@@ -95,7 +122,9 @@
         "extensions": [".ppt"],
         "hex_head": "D0CF11E0A1B11AE1",
         "text_pattern": "PowerPoint Document",
-        "deduct_from": "OLE"
+        "deduct_from": "OLE",
+        "priority": 8,
+        "min_file_size": 4096
     },
 
     {
@@ -104,7 +133,9 @@
         "extensions": [".docx"],
         "hex_head": "504B0304",
         "text_pattern": "word/document.xml",
-        "deduct_from": "ZIP"
+        "deduct_from": "ZIP",
+        "priority": 10,
+        "min_file_size": 1024
     },
     {
         "name": "XLSX",
@@ -112,7 +143,9 @@
         "extensions": [".xlsx"],
         "hex_head": "504B0304",
         "text_pattern": "xl/workbook.xml",
-        "deduct_from": "ZIP"
+        "deduct_from": "ZIP",
+        "priority": 10,
+        "min_file_size": 1024
     },
     {
         "name": "PPTX",
@@ -120,70 +153,92 @@
         "extensions": [".pptx"],
         "hex_head": "504B0304",
         "text_pattern": "ppt/presentation.xml",
-        "deduct_from": "ZIP"
+        "deduct_from": "ZIP",
+        "priority": 10,
+        "min_file_size": 1024
     },
 
     {
         "name": "7Z",
         "type": "binary",
         "extensions": [".7z"],
-        "hex_head": "377ABCAF271C"
+        "hex_head": "377ABCAF271C",
+        "priority": 5,
+        "min_file_size": 32
     },
     {
         "name": "GZIP",
         "type": "binary",
         "extensions": [".gz"],
-        "hex_head": "1F8B"
+        "hex_head": "1F8B08",
+        "priority": 3,
+        "min_file_size": 100
     },
     {
         "name": "PE",
         "type": "binary",
         "extensions": [".exe", ".dll"],
         "hex_head": "4D5A",
-        "text_pattern": "PE"
+        "text_pattern": "PE\\x00\\x00",
+        "priority": 5,
+        "min_file_size": 1024
     },
     {
         "name": "SQLITE",
         "type": "binary",
         "extensions": [".sqlite", ".db"],
-        "hex_head": "53514C69746520666F726D6174203300"
+        "hex_head": "53514C69746520666F726D6174203300",
+        "priority": 8,
+        "min_file_size": 512
     },
     {
         "name": "FLAC",
         "type": "binary",
         "extensions": [".flac"],
-        "hex_head": "664C6143"
+        "hex_head": "664C6143",
+        "priority": 5,
+        "min_file_size": 100
     },
     {
         "name": "WAV",
         "type": "binary",
         "extensions": [".wav"],
         "hex_head": "52494646",
-        "text_pattern": "WAVE"
+        "text_pattern": "WAVE",
+        "priority": 5,
+        "min_file_size": 44
     },
 
     {
         "name": "JSON",
         "type": "text",
         "extensions": [".json"],
-        "pattern": "\\{\\s*\"[^\"]+\"\\s*:"
+        "pattern": "\\{\\s*\"[^\"]+\"\\s*:",
+        "priority": 3,
+        "min_file_size": 10
     },
     {
         "name": "HTML",
         "type": "text",
         "extensions": [".html"],
-        "pattern": "<html.*?</html>"
+        "pattern": "<html.*?</html>",
+        "priority": 3,
+        "min_file_size": 50
     },
     {
         "name": "XML",
         "type": "text",
         "extensions": [".xml"],
-        "pattern": "<\\?xml"
+        "pattern": "<\\?xml",
+        "priority": 3,
+        "min_file_size": 20
     },
     {
         "name": "EMAIL",
         "type": "text",
         "extensions": [".eml"],
-        "pattern": "From:\\s.+\\r?\\n(?:To|Subject|Date|MIME-Version):"
+        "pattern": "From:\\s.+\\r?\\n(?:To|Subject|Date|MIME-Version):",
+        "priority": 5,
+        "min_file_size": 100
     }
 ]

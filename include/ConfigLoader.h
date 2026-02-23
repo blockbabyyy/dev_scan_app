@@ -73,6 +73,20 @@ public:
                     def.deduct_from = item["deduct_from"].get<std::string>();
                 }
 
+                if (item.contains("priority")) {
+                    def.priority = item["priority"].get<int>();
+                }
+
+                if (item.contains("min_file_size")) {
+                    def.min_file_size = item["min_file_size"].get<int>();
+                }
+
+                if (item.contains("exclusive_with")) {
+                    for (const auto& e : item["exclusive_with"]) {
+                        def.exclusive_with.push_back(e.get<std::string>());
+                    }
+                }
+
                 sigs.push_back(def);
             }
 

@@ -22,6 +22,15 @@ public:
             if (count > 0) det[name] = count;
         }
         j["detections"] = det;
+        
+        // Add embedded detections if any
+        if (!results.embedded_counts.empty()) {
+            nlohmann::json emb = nlohmann::json::object();
+            for (const auto& [name, count] : results.embedded_counts) {
+                if (count > 0) emb[name] = count;
+            }
+            j["embedded_detections"] = emb;
+        }
 
         std::ofstream f(path, std::ios::out | std::ios::trunc);
         if (f.is_open()) f << j.dump(2) << "\n";
@@ -36,7 +45,6 @@ public:
         if (!f.is_open()) return;
 
         f << "--- РЕЗУЛЬТАТЫ СКАНЕРА ---\n";
-        // Use a wider format for alignment on Cyrillic labels
         f << "Цель:   " << target << "\n";
         f << "Движок: " << engine_name << "\n";
         f << "--------------------------\n";
@@ -47,6 +55,16 @@ public:
                 f << std::left << std::setw(15) << name << " | " << count << "\n";
         }
         f << "--------------------------\n";
+        
+        if (!results.embedded_counts.empty()) {
+            f << "--- ВЛОЖЕНИЯ (внутри контейнеров) ---\n";
+            for (const auto& [name, count] : results.embedded_counts) {
+                if (count > 0)
+                    f << std::left << std::setw(15) << name << " | " << count << "\n";
+            }
+            f << "-----------------------------------\n";
+        }
+        
         f << "Всего файлов обработано: " << results.total_files_processed << "\n";
     }
 };

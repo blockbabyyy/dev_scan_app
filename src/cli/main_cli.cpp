@@ -12,6 +12,8 @@
 #include <chrono>
 #include <cctype>
 #include <cstdio>
+#include <algorithm>
+#include <ctime>
 #include <boost/iostreams/device/mapped_file.hpp>
 #include <nlohmann/json.hpp>
 #include "Scanner.h"
@@ -247,6 +249,7 @@ void print_ui_help() {
         << "  --output-json <path>       Export JSON report to path\n"
         << "  --output-txt <path>        Export TXT report to path\n"
         << "  --no-report                Skip report generation\n"
+        << "  --no-extract               Don't extract archives (default: auto-extract ZIP/7Z/RAR)\n"
         << "  --add-sig                  Interactive wizard to add a new signature\n"
         << "==================================================================\n";
 }
@@ -290,6 +293,7 @@ int main(int argc, char* argv[]) {
     std::string output_json;
     std::string output_txt;
     bool no_report = false;
+    bool extract_containers = true;  // По умолчанию извлекаем архивы
 
     for (int i = 2; i < argc; ++i) {
         std::string arg = argv[i];
@@ -317,6 +321,9 @@ int main(int argc, char* argv[]) {
         else if (arg == "--no-report") {
             no_report = true;
         }
+        else if (arg == "--no-extract") {  // Отключение извлечения
+            extract_containers = false;
+        }
     }
 
     Logger::info("Loading config: " + config_path);
@@ -329,9 +336,11 @@ int main(int argc, char* argv[]) {
 
     // Collect file paths
     std::vector<fs::path> file_paths;
+    std::vector<fs::path> temp_dirs;  // Track temp directories for cleanup
+    auto opts = fs::directory_options::skip_permission_denied;
+    
     try {
         if (fs::is_directory(target_path)) {
-            auto opts = fs::directory_options::skip_permission_denied;
             for (auto const& entry : fs::recursive_directory_iterator(target_path, opts)) {
                 if (entry.is_regular_file() && !entry.is_symlink())
                     file_paths.push_back(entry.path());
@@ -339,6 +348,35 @@ int main(int argc, char* argv[]) {
         }
         else if (fs::exists(target_path)) {
             file_paths.push_back(target_path);
+            
+            // Если файл — архив (ZIP/7Z/RAR), извлекаем его содержимое
+            // По умолчанию извлечение включено, можно отключить через --no-extract
+            if (extract_containers) {
+                std::string ext = fs::path(target_path).extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                
+                if (ext == ".zip" || ext == ".7z" || ext == ".rar") {
+                    // Создаём временную папку для распаковки
+                    // Используем timestamp в имени, чтобы избежать коллизий
+                    std::string temp_dir = fs::temp_directory_path().string() + "\\devscan_extract_" + std::to_string(std::time(nullptr));
+                    fs::create_directories(temp_dir);
+                    temp_dirs.push_back(temp_dir);
+                    
+                    // Используем PowerShell для распаковки ZIP
+                    // Expand-Archive работает только с ZIP, для 7Z/RAR нужен 7-Zip
+                    std::string ps_cmd = "powershell -Command \"Expand-Archive -Path '" + target_path + "' -DestinationPath '" + temp_dir + "' -Force 2>$null\"";
+                    int result = std::system(ps_cmd.c_str());
+                    
+                    // Если папка существует — сканируем её содержимое
+                    if (fs::exists(temp_dir)) {
+                        for (auto const& entry : fs::recursive_directory_iterator(temp_dir, opts)) {
+                            if (entry.is_regular_file() && !entry.is_symlink())
+                                file_paths.push_back(entry.path());
+                        }
+                        Logger::info("Extracted archive to: " + temp_dir);
+                    }
+                }
+            }
         }
     }
     catch (const std::exception& e) {
@@ -377,8 +415,10 @@ int main(int argc, char* argv[]) {
                     processed++;
                     continue;
                 }
+                
                 boost::iostreams::mapped_file_source mmap(file_paths[i].string());
                 if (mmap.is_open()) {
+                    local.reset_file_state();  // Reset per-file detection state
                     scanner->scan(mmap.data(), mmap.size(), local);
                     local.total_files_processed++;
                 }
@@ -429,6 +469,9 @@ int main(int argc, char* argv[]) {
     double elapsed = std::chrono::duration<double>(t_end - t_start).count();
 
     apply_deduction(results, sigs);
+    apply_container_hierarchy(results);  // Apply container hierarchy (ZIP-derived formats)
+    apply_exclusive_filter(results, sigs);  // Handle mutually exclusive signatures (RAR4/RAR5)
+    apply_container_false_positive_filter(results);  // Move embedded detections
     Logger::info("Scan complete. Files: " + std::to_string(results.total_files_processed)
                  + ", time: " + std::to_string(elapsed) + "s");
 
@@ -441,6 +484,17 @@ int main(int argc, char* argv[]) {
             std::cout << std::left << std::setw(15) << name << " | " << count << "\n";
     }
     std::cout << "--------------------------\n";
+    
+    // Show embedded detections
+    if (!results.embedded_counts.empty()) {
+        std::cout << "--- EMBEDDED (inside containers) ---\n";
+        for (auto const& [name, count] : results.embedded_counts) {
+            if (count > 0)
+                std::cout << std::left << std::setw(15) << name << " | " << count << "\n";
+        }
+        std::cout << "-----------------------------------\n";
+    }
+    
     std::cout << "Files processed: " << results.total_files_processed
               << "  (" << std::fixed << std::setprecision(2) << elapsed << "s)\n";
 
@@ -459,5 +513,13 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "[Log]     " << Logger::path() << "\n";
+    
+    // Cleanup temp directories
+    for (const auto& td : temp_dirs) {
+        try {
+            fs::remove_all(td);
+        } catch (...) {}
+    }
+    
     return 0;
 }
