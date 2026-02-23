@@ -69,12 +69,20 @@ struct SignatureDefinition {
 // Статистика сканирования одного файла или группы файлов
 // Хранит количество найденных сигнатур каждого типа
 struct ScanStats {
-    std::map<std::string, int> counts;         // Основные детекции (тип -> количество)
-    std::set<std::string> detected_types;      // Track which types were detected (for single-match-per-file)
+    std::map<std::string, int> counts;           // Standalone детекции (тип -> количество)
     std::map<std::string, int> embedded_counts;  // Вложенные детекции (внутри контейнеров)
-    int total_files_processed = 0;             // Сколько файлов обработано
+    std::set<std::string> detected_types;        // Track which types were detected (for single-match-per-file)
+    int total_files_processed = 0;               // Сколько файлов обработано
 
-    // Добавляет детекцию только один раз на файл
+    // Контейнеры и их содержимое (для рекурсивного сканирования)
+    struct ContainerInfo {
+        std::string path;
+        std::string type;
+        int depth;
+    };
+    std::vector<ContainerInfo> containers_to_scan;  // Очередь контейнеров на извлечение
+
+    // Добавляет детекцию только один раз на файл (для standalone)
     // Это предотвращает множественные срабатывания на одну сигнатуру в большом файле
     // Пример: внутри DOCX может быть 10 вхождений "word/document.xml",
     // но мы считаем это как ОДИН файл DOCX
@@ -85,11 +93,27 @@ struct ScanStats {
         return true;
     }
 
-    // Legacy метод (для обратной совместимости, не используется в новом коде)
+    // Добавляет детекцию с указанием контекста (standalone или embedded)
+    // Для embedded файлов считаем КАЖДОЕ вхождение (важно для подсчета изображений в DOCX)
+    void add_with_context(const std::string& name, bool is_embedded) {
+        if (is_embedded) {
+            embedded_counts[name]++;
+        } else {
+            add_once(name);  // Для standalone используем add_once
+        }
+    }
+
+    // Legacy метод (для обратной совместимости)
     void add(const std::string& name) { counts[name]++; }
 
     // Полный сброс статистики
-    void reset() { counts.clear(); detected_types.clear(); embedded_counts.clear(); total_files_processed = 0; }
+    void reset() { 
+        counts.clear(); 
+        detected_types.clear(); 
+        embedded_counts.clear(); 
+        containers_to_scan.clear();
+        total_files_processed = 0; 
+    }
 
     // Сброс состояния перед сканированием нового файла
     // detected_types очищается, но counts сохраняется (для агрегации по всем файлам)
@@ -101,6 +125,7 @@ struct ScanStats {
         for (const auto& [name, count] : other.counts) counts[name] += count;
         for (const auto& [name, count] : other.embedded_counts) embedded_counts[name] += count;
         for (const auto& t : other.detected_types) detected_types.insert(t);
+        for (const auto& c : other.containers_to_scan) containers_to_scan.push_back(c);
         total_files_processed += other.total_files_processed;
         return *this;
     }
@@ -108,6 +133,115 @@ struct ScanStats {
 
 // Функции постобработки результатов
 // Вызываются после сканирования всех файлов для коррекции счётчиков
+
+// Лимиты безопасности для рекурсивного сканирования
+constexpr int MAX_CONTAINER_DEPTH = 5;       // Максимальная глубина вложенности
+constexpr int MAX_CONTAINER_ENTRIES = 1000;  // Максимум файлов в одном контейнере
+constexpr size_t MAX_UNCOMPRESSED_SIZE = 100 * 1024 * 1024;  // 100MB лимит распаковки
+
+// Служебные файлы Office Open XML (не считаем как отдельные файлы)
+// Источник: ECMA-376 / ISO/IEC 29500, Microsoft Learn
+// ВАЖНО: document.xml, workbook.xml, presentation.xml НЕ включены - они нужны для определения типа файла!
+inline const std::set<std::string> OFFICE_XML_EXCEPTIONS = {
+    // Основные служебные XML
+    "[Content_Types].xml",
+    ".rels",
+    "_rels/.rels",
+    
+    // Word (DOCX) - кроме document.xml!
+    "word/styles.xml",
+    "word/settings.xml",
+    "word/fontTable.xml",
+    "word/theme/theme1.xml",
+    "word/webSettings.xml",
+    "word/numbering.xml",
+    "word/document.xml.rels",
+    "word/_rels/document.xml.rels",
+    
+    // Excel (XLSX) - кроме workbook.xml!
+    "xl/styles.xml",
+    "xl/settings.xml",
+    "xl/theme/theme1.xml",
+    "xl/workbook.xml.rels",
+    "xl/_rels/workbook.xml.rels",
+    
+    // PowerPoint (PPTX) - кроме presentation.xml!
+    "ppt/presProps.xml",
+    "ppt/viewProps.xml",
+    "ppt/theme/theme1.xml",
+    "ppt/tableStyles.xml",
+    "ppt/presentation.xml.rels",
+    "ppt/_rels/presentation.xml.rels",
+    
+    // Общие для Office
+    "docProps/core.xml",
+    "docProps/app.xml",
+    "docProps/thumbnail.emf",  // Миниатюра (EMF, не считаем как BMP)
+    "docProps/thumbnail.jpeg", // Миниатюра (JPEG)
+    
+    // Custom XML (пользовательские данные)
+    "customXml/item1.xml",
+    "customXml/itemProps1.xml",
+    "customXml/_rels/item1.xml.rels",
+    
+    // Slide layouts и masters (PPTX)
+    "ppt/slideMasters/",
+    "ppt/slideLayouts/",
+    "ppt/slides/",
+    "ppt/notesSlides/",
+    "ppt/handoutMasters/",
+    
+    // Printer settings (binary)
+    "ppt/printerSettings/"
+};
+
+// Фильтр для исключения служебных файлов Office
+inline bool is_office_system_file(const std::string& path) {
+    // Normalize path separators
+    std::string normalized = path;
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+    
+    // Проверка точного совпадения
+    if (OFFICE_XML_EXCEPTIONS.count(normalized)) return true;
+    
+    // Проверка по префиксу (для папок)
+    for (const auto& exc : OFFICE_XML_EXCEPTIONS) {
+        if (exc.back() == '/' && normalized.find(exc) == 0) return true;
+    }
+    
+    // Проверка расширений служебных файлов
+    if (normalized.find(".xml.rels") != std::string::npos) return true;
+    if (normalized.find("/_rels/") != std::string::npos) return true;
+    
+    // FIX: Skip XML files from Office containers EXCEPT key identification files
+    // These are internal structure files, not actual content
+    // КЛЮЧЕВЫЕ ФАЙЛЫ для определения типа (НЕ пропускаем):
+    //   word/document.xml, xl/workbook.xml, ppt/presentation.xml
+    
+    // Проверяем, является ли файл ключевым для определения типа
+    if (normalized == "word/document.xml" || 
+        normalized == "xl/workbook.xml" || 
+        normalized == "ppt/presentation.xml") {
+        return false;  // НЕ пропускаем ключевые файлы
+    }
+    
+    // Пропускаем остальные XML из офисных папок
+    if (normalized.find("/word/") != std::string::npos || 
+        normalized.find("/xl/") != std::string::npos || 
+        normalized.find("/ppt/") != std::string::npos ||
+        normalized.find("/docProps/") != std::string::npos ||
+        normalized.find("/customXml/") != std::string::npos) {
+        // Кроме медиа файлов (images)
+        if (normalized.find("/word/media/") != std::string::npos ||
+            normalized.find("/xl/media/") != std::string::npos ||
+            normalized.find("/ppt/media/") != std::string::npos) {
+            return false;  // Don't skip media files
+        }
+        return true;
+    }
+    
+    return false;
+}
 
 // 1. Вычитание коллизий
 // Пример: если найдено 5 DOCX и 15 ZIP, после apply_deduction будет 5 DOCX и 10 ZIP
@@ -117,13 +251,13 @@ void apply_deduction(ScanStats& stats, const std::vector<SignatureDefinition>& s
 // ZIP-производные (DOCX/XLSX/PPTX) вычитаются из общего счётчика ZIP
 void apply_container_hierarchy(ScanStats& stats);
 
-// 3. Фильтрация ложных срабатываний внутри контейнеров
-// Если файл — контейнер (DOCX/PPTX), то PNG/JPG внутри него считаем вложенными
-void apply_container_false_positive_filter(ScanStats& stats);
-
-// 4. Взаимоисключающие сигнатуры
+// 3. Взаимоисключающие сигнатуры
 // RAR4 vs RAR5: если оба найдены, оставляем только один по приоритету
 void apply_exclusive_filter(ScanStats& stats, const std::vector<SignatureDefinition>& sigs);
+
+// 4. Перемещение детекций из контейнеров в embedded_counts
+// Вызывается после рекурсивного сканирования контейнеров
+void apply_embedded_detection_filter(ScanStats& stats);
 
 // Базовый класс сканера (интерфейс)
 // Используется полиморфизм для переключения между движками

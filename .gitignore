@@ -425,3 +425,8 @@ dev_scan_app.zip
 to-do.txt
 _build.bat
 _test.bat
+
+# Python analysis scripts and temp data
+temp/
+*.pyc
+__pycache__/

@@ -40,7 +40,8 @@ find_package(re2 CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS regex iostreams)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(Threads REQUIRED)
-find_package(GTest CONFIG REQUIRED) # Добавили GTest
+find_package(GTest CONFIG REQUIRED)
+find_package(libzip CONFIG REQUIRED)  # Added for ZIP extraction
 
 # Hyperscan (ручной поиск)
 find_path(HYPERSCAN_INCLUDE_DIR NAMES hs/hs.h
@@ -84,6 +85,7 @@ target_link_libraries(DevScanApp PRIVATE
     DevScanCore
     Boost::iostreams
     Threads::Threads
+    libzip::zip
 )
 
 # === 5. ТЕСТЫ (TESTS) ===

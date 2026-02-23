@@ -10,6 +10,7 @@
         "hyperscan",
         "benchmark",
         "gtest",
-        "nlohmann-json"
+        "nlohmann-json",
+        "libzip"
     ]
 }

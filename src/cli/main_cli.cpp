@@ -14,6 +14,8 @@
 #include <cstdio>
 #include <algorithm>
 #include <ctime>
+#include <functional>
+#include <zip.h>  // libzip for ZIP extraction
 #include <boost/iostreams/device/mapped_file.hpp>
 #include <nlohmann/json.hpp>
 #include "Scanner.h"
@@ -24,6 +26,154 @@
 namespace fs = std::filesystem;
 
 static constexpr size_t DEFAULT_MAX_FILESIZE_MB = 512;
+
+// ---------------------------------------------------------------------------
+// ZIP extraction helper
+// ---------------------------------------------------------------------------
+
+static std::string detect_office_format(const fs::path& path) {
+    // Check if file is ZIP-based container (DOCX/XLSX/PPTX)
+    // FIX: Read file into buffer first for UTF-8 path support on Windows
+    std::vector<unsigned char> buffer;
+    try {
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+        if (!file) {
+            Logger::warn("Failed to open file: " + path.filename().string());
+            return "";
+        }
+        auto size = file.tellg();
+        file.seekg(0, std::ios::beg);
+        buffer.resize(static_cast<size_t>(size));
+        file.read(reinterpret_cast<char*>(buffer.data()), size);
+    }
+    catch (const std::exception& e) {
+        Logger::warn("Failed to read file: " + path.filename().string() + " - " + e.what());
+        return "";
+    }
+
+    zip_error_t error;
+    zip_error_init(&error);
+
+    zip_source_t* source = zip_source_buffer_create(buffer.data(), buffer.size(), 0, &error);
+    if (!source) {
+        Logger::warn("Failed to create ZIP buffer source: " + path.filename().string());
+        zip_error_fini(&error);
+        return "";
+    }
+
+    zip_t* archive = zip_open_from_source(source, ZIP_RDONLY, &error);
+    if (!archive) {
+        Logger::warn("Failed to open ZIP: " + path.filename().string() +
+                     " - " + zip_error_strerror(&error));
+        zip_source_free(source);
+        zip_error_fini(&error);
+        return "";
+    }
+
+    zip_int64_t num_entries = zip_get_num_entries(archive, 0);
+    std::set<std::string> entries;
+
+    for (zip_int64_t i = 0; i < num_entries; ++i) {
+        const char* name = zip_get_name(archive, i, ZIP_FL_ENC_RAW);
+        if (name) {
+            entries.insert(name);
+        }
+    }
+    zip_close(archive);  // This also frees the source
+
+    if (entries.count("word/document.xml")) return "DOCX";
+    if (entries.count("xl/workbook.xml")) return "XLSX";
+    if (entries.count("ppt/presentation.xml")) return "PPTX";
+
+    return entries.count("EOCD") ? "ZIP" : "";
+}
+
+static std::vector<fs::path> extract_zip_entries(const fs::path& zip_path,
+                                                  const fs::path& temp_dir,
+                                                  int max_entries, size_t max_size) {
+    std::vector<fs::path> extracted;
+
+    // FIX: Read file into buffer first for UTF-8 path support on Windows
+    std::vector<unsigned char> buffer;
+    try {
+        std::ifstream file(zip_path, std::ios::binary | std::ios::ate);
+        if (!file) {
+            zip_error_t dummy_error;
+            zip_error_init(&dummy_error);
+            Logger::warn("Failed to open ZIP file: " + zip_path.filename().string());
+            zip_error_fini(&dummy_error);
+            return extracted;
+        }
+        auto size = file.tellg();
+        file.seekg(0, std::ios::beg);
+        buffer.resize(static_cast<size_t>(size));
+        file.read(reinterpret_cast<char*>(buffer.data()), size);
+    }
+    catch (const std::exception& e) {
+        Logger::warn("Failed to read ZIP file: " + zip_path.filename().string() + " - " + e.what());
+        return extracted;
+    }
+
+    zip_error_t error;
+    zip_error_init(&error);
+
+    zip_source_t* source = zip_source_buffer_create(buffer.data(), buffer.size(), 0, &error);
+    if (!source) {
+        zip_error_fini(&error);
+        return extracted;
+    }
+
+    zip_t* archive = zip_open_from_source(source, ZIP_RDONLY, &error);
+    if (!archive) {
+        zip_source_free(source);
+        zip_error_fini(&error);
+        return extracted;
+    }
+
+    zip_int64_t num_entries = zip_get_num_entries(archive, 0);
+    if (num_entries > max_entries) {
+        zip_close(archive);
+        zip_error_fini(&error);
+        return extracted;
+    }
+
+    size_t total_size = 0;
+    for (zip_int64_t i = 0; i < num_entries; ++i) {
+        const char* name = zip_get_name(archive, i, ZIP_FL_ENC_RAW);
+        if (!name) continue;
+        std::string name_str(name);
+        if (name_str.empty() || name_str.back() == '/') continue;  // Skip directories
+
+        zip_stat_t stat;
+        if (zip_stat_index(archive, i, 0, &stat) != 0) continue;
+
+        if (total_size + stat.size > max_size) break;
+
+        zip_file_t* file = zip_fopen_index(archive, i, 0);
+        if (!file) continue;
+
+        std::vector<char> buffer(stat.size);
+        zip_int64_t bytes_read = zip_fread(file, buffer.data(), stat.size);
+        zip_fclose(file);
+
+        if (bytes_read != static_cast<zip_int64_t>(stat.size)) continue;
+
+        fs::path out_path = temp_dir / name_str;
+        fs::create_directories(out_path.parent_path());
+
+        std::ofstream out(out_path, std::ios::binary);
+        if (out.is_open()) {
+            out.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+            out.close();
+            extracted.push_back(out_path);
+            total_size += stat.size;
+        }
+    }
+
+    zip_close(archive);
+    zip_error_fini(&error);
+    return extracted;
+}
 
 // ---------------------------------------------------------------------------
 // --add-sig wizard
@@ -354,28 +504,27 @@ int main(int argc, char* argv[]) {
             if (extract_containers) {
                 std::string ext = fs::path(target_path).extension().string();
                 std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                
-                if (ext == ".zip" || ext == ".7z" || ext == ".rar") {
+
+                // CROSS-PLATFORM FIX: Используем libzip вместо PowerShell для кроссплатформенности
+                // PowerShell работает только на Windows, libzip работает на Windows/Linux/macOS
+                if (ext == ".zip") {
                     // Создаём временную папку для распаковки
-                    // Используем timestamp в имени, чтобы избежать коллизий
-                    std::string temp_dir = fs::temp_directory_path().string() + "\\devscan_extract_" + std::to_string(std::time(nullptr));
+                    std::string temp_dir = fs::temp_directory_path().string() + "/devscan_extract_" + std::to_string(std::time(nullptr));
                     fs::create_directories(temp_dir);
                     temp_dirs.push_back(temp_dir);
+
+                    // Используем libzip для извлечения
+                    auto extracted = extract_zip_entries(target_path, temp_dir, MAX_CONTAINER_ENTRIES, MAX_UNCOMPRESSED_SIZE);
                     
-                    // Используем PowerShell для распаковки ZIP
-                    // Expand-Archive работает только с ZIP, для 7Z/RAR нужен 7-Zip
-                    std::string ps_cmd = "powershell -Command \"Expand-Archive -Path '" + target_path + "' -DestinationPath '" + temp_dir + "' -Force 2>$null\"";
-                    int result = std::system(ps_cmd.c_str());
-                    
-                    // Если папка существует — сканируем её содержимое
-                    if (fs::exists(temp_dir)) {
-                        for (auto const& entry : fs::recursive_directory_iterator(temp_dir, opts)) {
-                            if (entry.is_regular_file() && !entry.is_symlink())
-                                file_paths.push_back(entry.path());
+                    if (!extracted.empty()) {
+                        Logger::info("Extracted ZIP to: " + temp_dir + " (" + std::to_string(extracted.size()) + " files)");
+                        for (const auto& f : extracted) {
+                            file_paths.push_back(f);
                         }
-                        Logger::info("Extracted archive to: " + temp_dir);
                     }
                 }
+                // NOTE: 7Z и RAR требуют внешних утилит (7-Zip), которые могут быть недоступны на Linux
+                // Для полной кроссплатформенности рекомендуется использовать только ZIP
             }
         }
     }
@@ -397,36 +546,144 @@ int main(int argc, char* argv[]) {
     if (num_threads > total_files && total_files > 0) num_threads = static_cast<unsigned int>(total_files);
     if (num_threads == 0) num_threads = 1;
 
+    // Simple scan function (no recursion - recursion handled inline)
     auto scan_chunk = [&](size_t start, size_t end) -> ScanStats {
         auto scanner = Scanner::create(engine_choice);
         scanner->prepare(sigs);
         ScanStats local;
-
+        std::vector<std::pair<fs::path, int>> scan_queue;  // path, depth
+        
         for (size_t i = start; i < end; ++i) {
-            try {
-                auto fsize = fs::file_size(file_paths[i]);
-                if (fsize == 0) {
-                    processed++;
-                    continue;
+            scan_queue.clear();
+            scan_queue.push_back({file_paths[i], 0});
+            
+            while (!scan_queue.empty()) {
+                auto [curr_path, depth] = scan_queue.back();
+                scan_queue.pop_back();
+
+                if (depth > MAX_CONTAINER_DEPTH) continue;
+
+                try {
+                    auto fsize = fs::file_size(curr_path);
+                    if (fsize == 0 || fsize > max_filesize) continue;
+
+                    // FIX: Skip Office Open XML system files to avoid false positives
+                    // These are internal structure files, not actual content
+                    std::string relative_path = curr_path.filename().string();
+                    if (depth > 0) {
+                        // For extracted files, check against Office XML exceptions
+                        // Get relative path from temp directory
+                        std::string full_str = curr_path.string();
+                        size_t temp_pos = full_str.find("devscan_");
+                        if (temp_pos != std::string::npos) {
+                            relative_path = full_str.substr(temp_pos);
+                            // Find the part after the temp dir name
+                            size_t slash_pos = relative_path.find('/');
+                            if (slash_pos != std::string::npos) {
+                                relative_path = relative_path.substr(slash_pos + 1);
+                            } else {
+                                size_t backslash_pos = relative_path.find('\\');
+                                if (backslash_pos != std::string::npos) {
+                                    relative_path = relative_path.substr(backslash_pos + 1);
+                                }
+                            }
+                        }
+                        // is_office_system_file will normalize path separators internally
+                        
+                        if (is_office_system_file(relative_path)) {
+                            processed++;
+                            continue;
+                        }
+                    }
+                    
+                    // FIX: Also skip files by extension to avoid false positives
+                    // EMF files in docProps are not actual BMP images
+                    // XML files in Office containers are internal structure, not actual content
+                    std::string file_ext = curr_path.extension().string();
+                    std::transform(file_ext.begin(), file_ext.end(), file_ext.begin(), ::tolower);
+                    if (file_ext == ".emf" || file_ext == ".bin" || file_ext == ".rels") {
+                        processed++;
+                        continue;
+                    }
+                    
+                    // FIX: Skip XML files from Office containers (except at root level)
+                    // document.xml, workbook.xml, presentation.xml are internal structure
+                    if (file_ext == ".xml" && depth > 0) {
+                        std::string full_str = curr_path.string();
+                        // Skip XML from word/, xl/, ppt/, docProps/, customXml/
+                        if (full_str.find("/word/") != std::string::npos ||
+                            full_str.find("\\word\\") != std::string::npos ||
+                            full_str.find("/xl/") != std::string::npos ||
+                            full_str.find("\\xl\\") != std::string::npos ||
+                            full_str.find("/ppt/") != std::string::npos ||
+                            full_str.find("\\ppt\\") != std::string::npos ||
+                            full_str.find("/docProps/") != std::string::npos ||
+                            full_str.find("/customXml/") != std::string::npos) {
+                            processed++;
+                            continue;
+                        }
+                    }
+
+                    boost::iostreams::mapped_file_source mmap(curr_path.string());
+                    if (!mmap.is_open()) continue;
+
+                    ScanStats file_stats;
+                    file_stats.reset_file_state();
+                    scanner->scan(mmap.data(), mmap.size(), file_stats);
+                    file_stats.total_files_processed++;
+
+                    bool is_embedded = (depth > 0);
+
+                    // Move counts to appropriate location
+                    if (is_embedded) {
+                        for (const auto& [name, count] : file_stats.counts) {
+                            local.embedded_counts[name] += count;
+                        }
+                    } else {
+                        for (const auto& [name, count] : file_stats.counts) {
+                            local.counts[name] += count;
+                        }
+                    }
+
+                    mmap.close();
+
+                    // Check if this is a ZIP-based container
+                    std::string ext = curr_path.extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+                    bool is_container = (ext == ".zip" || ext == ".docx" || ext == ".xlsx" ||
+                                         ext == ".pptx" || ext == ".epub");
+
+                    if (is_container && extract_containers && depth < MAX_CONTAINER_DEPTH) {
+                        std::string office_type = detect_office_format(curr_path);
+                        if (!office_type.empty() || ext == ".zip") {
+                            fs::path temp_dir = fs::temp_directory_path() /
+                                               ("devscan_" + std::to_string(depth) + "_" +
+                                                std::to_string(std::time(nullptr)));
+                            fs::create_directories(temp_dir);
+                            temp_dirs.push_back(temp_dir);
+
+                            auto extracted = extract_zip_entries(curr_path, temp_dir,
+                                                                  MAX_CONTAINER_ENTRIES,
+                                                                  MAX_UNCOMPRESSED_SIZE);
+
+                            if (!extracted.empty()) {
+                                Logger::info("Extracted " + (office_type.empty() ? "ZIP" : office_type) +
+                                            " " + curr_path.filename().string() + ": " +
+                                            std::to_string(extracted.size()) + " entries");
+
+                                for (const auto& entry : extracted) {
+                                    scan_queue.push_back({entry, depth + 1});
+                                }
+                            }
+                        }
+                    }
                 }
-                if (fsize > max_filesize) {
-                    Logger::warn("Skipped (too large): " + file_paths[i].string()
-                                 + " (" + std::to_string(fsize / 1024 / 1024) + " MB)");
-                    processed++;
-                    continue;
+                catch (const std::exception& e) {
+                    Logger::warn("Skipped: " + curr_path.string() + ": " + e.what());
                 }
-                
-                boost::iostreams::mapped_file_source mmap(file_paths[i].string());
-                if (mmap.is_open()) {
-                    local.reset_file_state();  // Reset per-file detection state
-                    scanner->scan(mmap.data(), mmap.size(), local);
-                    local.total_files_processed++;
-                }
+                processed++;
             }
-            catch (const std::exception& e) {
-                Logger::warn("Skipped: " + file_paths[i].string() + ": " + e.what());
-            }
-            processed++;
         }
         return local;
     };
@@ -471,28 +728,38 @@ int main(int argc, char* argv[]) {
     apply_deduction(results, sigs);
     apply_container_hierarchy(results);  // Apply container hierarchy (ZIP-derived formats)
     apply_exclusive_filter(results, sigs);  // Handle mutually exclusive signatures (RAR4/RAR5)
-    apply_container_false_positive_filter(results);  // Move embedded detections
+    // apply_container_false_positive_filter removed - replaced with recursive container scanning
     Logger::info("Scan complete. Files: " + std::to_string(results.total_files_processed)
                  + ", time: " + std::to_string(elapsed) + "s");
 
-    // Results table
+    // Results table with new format: "found X type (Y embedded)"
     std::cout << "\n--- SCAN RESULTS ---\n";
-    std::cout << std::left << std::setw(15) << "Type" << " | " << "Count\n";
-    std::cout << "--------------------------\n";
-    for (auto const& [name, count] : results.counts) {
-        if (count > 0)
-            std::cout << std::left << std::setw(15) << name << " | " << count << "\n";
-    }
-    std::cout << "--------------------------\n";
     
-    // Show embedded detections
-    if (!results.embedded_counts.empty()) {
-        std::cout << "--- EMBEDDED (inside containers) ---\n";
-        for (auto const& [name, count] : results.embedded_counts) {
-            if (count > 0)
-                std::cout << std::left << std::setw(15) << name << " | " << count << "\n";
+    // Combine standalone and embedded counts for display
+    std::map<std::string, std::pair<int, int>> all_detections;  // type -> (standalone, embedded)
+    
+    for (const auto& [name, count] : results.counts) {
+        if (count > 0) {
+            all_detections[name].first = count;
         }
-        std::cout << "-----------------------------------\n";
+    }
+    for (const auto& [name, count] : results.embedded_counts) {
+        if (count > 0) {
+            all_detections[name].second = count;
+        }
+    }
+    
+    // Print results in new format
+    for (const auto& [name, counts] : all_detections) {
+        int standalone = counts.first;
+        int embedded = counts.second;
+        int total = standalone + embedded;
+        
+        if (embedded > 0) {
+            std::cout << "found " << total << " " << name << " (" << embedded << " embedded)\n";
+        } else {
+            std::cout << "found " << total << " " << name << "\n";
+        }
     }
     
     std::cout << "Files processed: " << results.total_files_processed

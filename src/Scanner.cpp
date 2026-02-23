@@ -33,9 +33,11 @@ namespace {
         std::string head = hex_to_regex_str(def.hex_head);
         std::string tail = hex_to_regex_str(def.hex_tail);
 
-        if (!head.empty() && !tail.empty()) return head + ".*?" + tail;
-        if (!head.empty() && !def.text_pattern.empty()) return head + ".*?" + def.text_pattern;
-        if (!head.empty()) return head;
+        // Для бинарных сигнатур с hex_head — привязка к началу файла
+        // Это предотвращает ложные срабатывания когда сигнатура найдена в середине файла
+        if (!head.empty() && !tail.empty()) return "^" + head + ".*?" + tail;
+        if (!head.empty() && !def.text_pattern.empty()) return "^" + head + ".*?" + def.text_pattern;
+        if (!head.empty()) return "^" + head;
 
         // Fallback: head пуст, но есть text_pattern или tail
         if (!def.text_pattern.empty()) return def.text_pattern;
@@ -76,37 +78,13 @@ void apply_container_hierarchy(ScanStats& stats) {
     }
 }
 
-// Remove likely false positives that occur inside container formats
-// When DOCX/XLSX/PPTX is detected, other signatures (BMP, JPG, GZIP, etc.) 
-// found in the same file are likely from embedded data within the ZIP structure
-void apply_container_false_positive_filter(ScanStats& stats) {
-    // List of signatures that are commonly false-detected inside ZIP containers
-    const std::vector<std::string> likely_fp_inside_containers = {
-        "BMP", "GIF", "MP3", "WAV", "FLAC", 
-        "GZIP", "PE", "MKV", "SQLITE"
-    };
-    
-    // Check if any container format was detected
-    bool has_container = stats.counts.count("DOCX") || stats.counts.count("XLSX") || stats.counts.count("PPTX");
-    
-    if (has_container) {
-        // Move likely false positives to embedded_counts
-        for (const auto& fp : likely_fp_inside_containers) {
-            if (stats.counts.count(fp)) {
-                stats.embedded_counts[fp] = stats.counts[fp];
-                stats.counts.erase(fp);
-            }
-        }
-        // For JPG and PNG: move to embedded if count seems unreasonable
-        if (stats.counts.count("JPG") && stats.counts["JPG"] > 2) {
-            stats.embedded_counts["JPG"] = stats.counts["JPG"];
-            stats.counts.erase("JPG");
-        }
-        if (stats.counts.count("PNG") && stats.counts["PNG"] > 4) {
-            stats.embedded_counts["PNG"] = stats.counts["PNG"];
-            stats.counts.erase("PNG");
-        }
-    }
+// Move detections from recursive container scanning to embedded_counts
+// This function is called after all containers have been recursively scanned
+// The containers_to_scan queue is populated during initial scanning when a container is detected
+void apply_embedded_detection_filter(ScanStats& stats) {
+    // This function is now a no-op because embedded_counts are populated directly
+    // during recursive container scanning in main_cli.cpp
+    // The old heuristic-based approach (apply_container_false_positive_filter) has been removed
 }
 
 // Handle mutually exclusive signatures (e.g., RAR4 vs RAR5)
