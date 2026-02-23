@@ -420,3 +420,8 @@ input/
 CMakeSettings.json
 dev_scan_app.zip
 .aider*
+
+# Local dev files
+to-do.txt
+_build.bat
+_test.bat
