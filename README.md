@@ -39,6 +39,16 @@ DevScan/
 └── CMakeLists.txt
 ```
 
+После сборки в `out/build/x64-Release/`:
+
+```
+bin/        ← DevScanApp.exe, DevScanTests.exe, DevScanBenchmarks.exe
+            ← все *.dll зависимости, signatures.json
+lib/        ← DevScanCore.lib
+pdb/        ← *.pdb (отладочные символы)
+CMakeFiles/ ← объектные файлы (CMake internal)
+```
+
 ## Требования
 
 - C++17
@@ -81,13 +91,13 @@ DevScanApp.exe --version
 ### Базовый запуск
 
 ```bash
-DevScanApp.exe <путь_к_папке_или_файлу>
+bin/DevScanApp.exe <путь_к_папке_или_файлу>
 ```
 
 ### Все опции
 
 ```bash
-DevScanApp.exe C:/data -e re2 -j 8 --output-json report.json
+bin/DevScanApp.exe C:/data -e re2 -j 8 --output-json report.json
 ```
 
 | Опция | Описание |
@@ -209,11 +219,11 @@ ZIP: 15  → после коррекции: 15 - 5(DOCX) - 3(XLSX) - 2(PPTX) = 5
 ## Тесты
 
 ```bash
-# Запуск всех тестов
-./DevScanTests
+# Запуск всех тестов (из папки bin/)
+./bin/DevScanTests
 
-# Через CTest
-ctest --test-dir build
+# Через CTest (из build-директории)
+ctest --test-dir out/build/x64-Release
 ```
 
 ### Набор тестов (45 тестов)
@@ -253,7 +263,7 @@ ctest --test-dir build
 ## Бенчмарки
 
 ```bash
-./DevScanBenchmarks
+./bin/DevScanBenchmarks
 ```
 
 Запускает сравнение Hyperscan, RE2 и Boost.Regex на датасете из 50 файлов (mix=0.2) в режимах 1 и 8 потоков. Перед бенчмарком выводится таблица точности детекции по каждому движку.

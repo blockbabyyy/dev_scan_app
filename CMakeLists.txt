@@ -18,6 +18,23 @@ project(DevScan)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# === OUTPUT STRUCTURE ===
+# Все бинарники и DLL-зависимости -> bin/
+# Статические библиотеки         -> lib/
+# PDB-символы                    -> pdb/
+# .ilk (инкрементальная линковка) -> убраны через /INCREMENTAL:NO
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY                "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE        "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/bin")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY                "${CMAKE_BINARY_DIR}/lib")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE        "${CMAKE_BINARY_DIR}/lib")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/lib")
+
+if(MSVC)
+    # Отключаем инкрементальную линковку — убирает .ilk-файлы
+    add_link_options(/INCREMENTAL:NO)
+endif()
+
 # === 2. ЗАВИСИМОСТИ ===
 find_package(re2 CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS regex iostreams)
@@ -94,7 +111,9 @@ target_link_libraries(DevScanTests PRIVATE
 
 # Регистрация тестов в CTest
 include(GoogleTest)
-gtest_discover_tests(DevScanTests)
+gtest_discover_tests(DevScanTests
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
 
 # === 6. БЕНЧМАРКИ (BENCHMARKS) ===
 find_package(benchmark CONFIG REQUIRED)
@@ -115,17 +134,29 @@ target_link_libraries(DevScanBenchmarks PRIVATE
     Boost::iostreams
 )
 
-# === 7. КОПИРОВАНИЕ signatures.json В BUILD DIR ===
+# === 7. PDB → pdb/ ===
+set_target_properties(DevScanApp DevScanTests DevScanBenchmarks
+    PROPERTIES PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/pdb"
+)
+
+# === 8. КОПИРОВАНИЕ signatures.json ===
+# Копируем в bin/ (рядом с .exe для тестов и запуска из bin/)
+# и в корень build/ (для запуска через ./bin/... из корня build)
 add_custom_command(
-    OUTPUT  "${CMAKE_BINARY_DIR}/signatures.json"
+    OUTPUT  "${CMAKE_BINARY_DIR}/bin/signatures.json"
+            "${CMAKE_BINARY_DIR}/signatures.json"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/signatures.json"
+            "${CMAKE_BINARY_DIR}/bin/signatures.json"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${CMAKE_SOURCE_DIR}/signatures.json"
             "${CMAKE_BINARY_DIR}/signatures.json"
     DEPENDS "${CMAKE_SOURCE_DIR}/signatures.json"
-    COMMENT "Copying signatures.json to build dir"
+    COMMENT "Copying signatures.json to bin/ and build root"
 )
 add_custom_target(copy_signatures ALL
-    DEPENDS "${CMAKE_BINARY_DIR}/signatures.json"
+    DEPENDS "${CMAKE_BINARY_DIR}/bin/signatures.json"
+            "${CMAKE_BINARY_DIR}/signatures.json"
 )
 add_dependencies(DevScanApp        copy_signatures)
 add_dependencies(DevScanTests      copy_signatures)
