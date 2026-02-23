@@ -7,7 +7,7 @@
 - **Три движка сканирования**: [Hyperscan](https://github.com/intel/hyperscan) (по умолчанию), [RE2](https://github.com/google/re2), [Boost.Regex](https://www.boost.org/doc/libs/release/libs/regex/)
 - **27 типов файлов** из коробки (PDF, ZIP, RAR4/5, PNG, JPG, GIF, BMP, MKV, MP3, OLE, DOC, XLS, PPT, DOCX, XLSX, PPTX, JSON, HTML, XML, EMAIL, 7Z, GZIP, PE, SQLITE, FLAC, WAV)
 - **Коррекция коллизий** — DOCX/XLSX/PPTX автоматически вычитаются из ZIP, DOC/XLS/PPT из OLE
-- **Конфигурируемые сигнатуры** — добавляйте свои типы через `signatures.json`
+- **Конфигурируемые сигнатуры** — добавляйте свои типы через `signatures.json` или интерактивным визардом `--add-sig`
 - **Экспорт результатов** — отчёты в JSON и TXT (`crash_report/report.json`, `crash_report/report.txt`)
 - **Логирование** — лог-файл в `crash_report/devscan_YYYYMMDD_HHMMSS.log`
 - **Многопоточность** — по умолчанию используются все ядра процессора
@@ -20,7 +20,7 @@ DevScan/
 ├── include/
 │   ├── Scanner.h           # Интерфейс Scanner + движки (Boost, RE2, Hyperscan)
 │   ├── ConfigLoader.h      # Загрузка сигнатур из JSON
-│   ├── TypeMap.h           # Маппинг расширений -> имён типов
+│   ├── TypeMap.h           # build_ext_to_type / build_type_to_ext (по сигнатурам)
 │   ├── Logger.h            # Логгер (crash_report/)
 │   ├── ReportWriter.h      # Экспорт результатов (JSON/TXT)
 │   └── generator/
@@ -99,6 +99,7 @@ DevScanApp.exe C:/data -e re2 -j 8 --output-json report.json
 | `--output-json <path>` | Сохранить JSON-отчёт по указанному пути |
 | `--output-txt <path>` | Сохранить TXT-отчёт по указанному пути |
 | `--no-report` | Не генерировать отчёты |
+| `--add-sig` | Интерактивный визард для добавления новой сигнатуры |
 
 ### Вывод
 
@@ -141,12 +142,13 @@ Files processed: 150  (1.23s)
 
 ## Сигнатуры
 
-Сигнатуры хранятся в `signatures.json`. Каждая запись:
+Сигнатуры хранятся в `signatures.json` — единственный источник истины для сканера, генератора и маппинга расширений. Каждая запись:
 
 | Поле | Тип | Описание |
 |---|---|---|
 | `name` | string | Имя типа (например, `"PDF"`) |
 | `type` | string | `"binary"` или `"text"` |
+| `extensions` | array | Расширения файлов (например, `[".pdf"]`, `[".exe", ".dll"]`, `[]`) |
 | `hex_head` | string | Magic bytes начала файла (HEX) |
 | `hex_tail` | string | Magic bytes конца файла (HEX, опционально) |
 | `text_pattern` | string | Дополнительный regex-якорь для бинарных сигнатур |
@@ -159,6 +161,7 @@ Files processed: 150  (1.23s)
 {
   "name": "MY_FORMAT",
   "type": "binary",
+  "extensions": [".myf"],
   "hex_head": "4D5A",
   "hex_tail": "00000000"
 }
@@ -170,9 +173,28 @@ Files processed: 150  (1.23s)
 {
   "name": "LOG_ERROR",
   "type": "text",
+  "extensions": [".log"],
   "pattern": "Error:\\s\\d+"
 }
 ```
+
+### Добавление сигнатуры через визард
+
+```bash
+DevScanApp.exe --add-sig
+# или с нестандартным конфигом:
+DevScanApp.exe --add-sig -c my_sigs.json
+```
+
+Визард проведёт по шагам:
+1. Ввод имени типа
+2. Выбор типа (`binary` / `text`)
+3. Путь к sample-файлу для авто-определения magic bytes (или ввод HEX вручную)
+4. Опциональное чтение tail-байт из того же файла
+5. Regex-якорь для уточнения (опционально)
+6. Список расширений через запятую
+7. `deduct_from` (опционально)
+8. Превью JSON → подтверждение → запись в файл
 
 ### Механизм вычитания (deduct_from)
 

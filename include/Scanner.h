@@ -19,6 +19,7 @@ struct SignatureDefinition {
     std::string text_pattern;
     SignatureType type = SignatureType::BINARY;
     std::string deduct_from;
+    std::vector<std::string> extensions;   // e.g. [".pdf"], [".exe", ".dll"]
 };
 
 struct ScanStats {

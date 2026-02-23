@@ -1,5 +1,4 @@
 #include "generator/Generator.h"
-#include "TypeMap.h"
 #include "ConfigLoader.h"
 #include <iostream>
 #include <sstream>
@@ -75,13 +74,14 @@ DataSetGenerator::DataSetGenerator(const std::string& config_path) {
 
 void DataSetGenerator::load_signatures(const std::string& config_path) {
     auto sigs = ConfigLoader::load(config_path);
-    auto& type_ext = type_to_ext_map();
+    m_ext_to_type = build_ext_to_type(sigs);
+    m_type_to_ext = build_type_to_ext(sigs);
 
     for (const auto& sig : sigs) {
         if (sig.type == SignatureType::TEXT) continue; // текстовые шаблоны добавляем вручную
 
-        auto it = type_ext.find(sig.name);
-        if (it == type_ext.end()) continue; // нет расширения — пропускаем (OLE, RAR5 без .rar5)
+        auto it = m_type_to_ext.find(sig.name);
+        if (it == m_type_to_ext.end()) continue; // нет расширения — пропускаем (OLE и т.п.)
 
         const std::string& ext = it->second;
 
@@ -224,7 +224,8 @@ std::pair<std::string, std::string> DataSetGenerator::create_payload(std::mt1993
 }
 
 void DataSetGenerator::update_stats(const std::string& ext, GenStats& stats) {
-    std::string type = ext_to_type(ext);
+    auto it = m_ext_to_type.find(ext);
+    std::string type = (it != m_ext_to_type.end()) ? it->second : "";
     if (!type.empty()) stats.add(type);
     stats.total_files_processed++;
 }

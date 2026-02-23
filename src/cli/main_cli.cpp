@@ -1,5 +1,8 @@
 #include <iostream>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <set>
 #include <vector>
 #include <string>
 #include <iomanip>
@@ -7,7 +10,10 @@
 #include <future>
 #include <atomic>
 #include <chrono>
+#include <cctype>
+#include <cstdio>
 #include <boost/iostreams/device/mapped_file.hpp>
+#include <nlohmann/json.hpp>
 #include "Scanner.h"
 #include "ConfigLoader.h"
 #include "Logger.h"
@@ -16,6 +22,216 @@
 namespace fs = std::filesystem;
 
 static constexpr size_t DEFAULT_MAX_FILESIZE_MB = 512;
+
+// ---------------------------------------------------------------------------
+// --add-sig wizard
+// ---------------------------------------------------------------------------
+
+static void print_hexdump(const unsigned char* data, size_t len) {
+    for (size_t i = 0; i < len; i += 16) {
+        std::printf("  %04X  ", static_cast<unsigned>(i));
+        for (size_t j = 0; j < 16; ++j) {
+            if (i + j < len) std::printf("%02X ", data[i + j]);
+            else              std::printf("   ");
+            if (j == 7)       std::printf(" ");
+        }
+        std::printf(" ");
+        for (size_t j = 0; j < 16 && i + j < len; ++j)
+            std::putchar(std::isprint(static_cast<unsigned char>(data[i + j])) ? data[i + j] : '.');
+        std::putchar('\n');
+    }
+}
+
+static int run_add_sig_wizard(const std::string& config_path) {
+    // 1. Load existing JSON (or start fresh)
+    nlohmann::json arr = nlohmann::json::array();
+    {
+        std::ifstream f(config_path);
+        if (f.is_open()) {
+            try {
+                f >> arr;
+            } catch (const std::exception& ex) {
+                std::cerr << "Error: failed to parse " << config_path << ": " << ex.what() << "\n";
+                return 1;
+            }
+            if (!arr.is_array()) {
+                std::cerr << "Error: " << config_path << " root must be an array []\n";
+                return 1;
+            }
+        }
+        // If file doesn't exist yet, arr stays as empty array — we'll create it.
+    }
+
+    // 2. Collect existing names for duplicate check
+    std::set<std::string> existing_names;
+    for (const auto& e : arr)
+        if (e.contains("name"))
+            existing_names.insert(e["name"].get<std::string>());
+
+    std::cout << "\n=== Add Signature Wizard ===\n\n";
+
+    // 3. Name
+    std::string sig_name;
+    while (true) {
+        std::cout << "Signature name (e.g. MYFORMAT): ";
+        std::getline(std::cin, sig_name);
+        if (sig_name.empty()) { std::cout << "  Name cannot be empty.\n"; continue; }
+        if (existing_names.count(sig_name)) {
+            std::cout << "  Name '" << sig_name << "' already exists. Choose another.\n";
+            continue;
+        }
+        break;
+    }
+
+    // 4. Type
+    std::string type_input;
+    std::cout << "Type [binary/text] (default: binary): ";
+    std::getline(std::cin, type_input);
+    bool is_binary = (type_input != "text");
+
+    std::string hex_head, hex_tail, text_pattern;
+
+    if (is_binary) {
+        // 5. Sample file for auto hex detection
+        std::string sample_path;
+        std::cout << "Sample file path (Enter to skip): ";
+        std::getline(std::cin, sample_path);
+
+        if (!sample_path.empty()) {
+            std::ifstream sf(sample_path, std::ios::binary);
+            if (!sf.is_open()) {
+                std::cout << "  Warning: cannot open '" << sample_path << "'\n";
+            } else {
+                unsigned char buf[16] = {};
+                sf.read(reinterpret_cast<char*>(buf), 16);
+                size_t read_count = static_cast<size_t>(sf.gcount());
+
+                std::cout << "First " << read_count << " bytes:\n";
+                print_hexdump(buf, read_count);
+
+                // How many bytes to use as header
+                std::string nbytes_str;
+                std::cout << "Bytes to use as header (1-" << read_count << "): ";
+                std::getline(std::cin, nbytes_str);
+                int nbytes = 0;
+                try { nbytes = std::stoi(nbytes_str); } catch (...) {}
+                if (nbytes < 1) nbytes = 1;
+                if (nbytes > static_cast<int>(read_count)) nbytes = static_cast<int>(read_count);
+
+                std::ostringstream hs;
+                hs << std::uppercase << std::hex << std::setfill('0');
+                for (int i = 0; i < nbytes; ++i)
+                    hs << std::setw(2) << static_cast<int>(buf[i]);
+                hex_head = hs.str();
+                std::cout << "  hex_head: " << hex_head << "\n";
+
+                // Optional tail
+                std::string tail_choice;
+                std::cout << "Read tail bytes from file? [y/N]: ";
+                std::getline(std::cin, tail_choice);
+                if (tail_choice == "y" || tail_choice == "Y") {
+                    std::string ntail_str;
+                    std::cout << "How many bytes from the end (1-16): ";
+                    std::getline(std::cin, ntail_str);
+                    int ntail = 0;
+                    try { ntail = std::stoi(ntail_str); } catch (...) {}
+                    if (ntail < 1) ntail = 1;
+                    if (ntail > 16) ntail = 16;
+
+                    sf.clear();
+                    sf.seekg(0, std::ios::end);
+                    std::streamoff fsize = sf.tellg();
+                    if (fsize >= ntail) {
+                        sf.seekg(-ntail, std::ios::end);
+                        unsigned char tbuf[16] = {};
+                        sf.read(reinterpret_cast<char*>(tbuf), ntail);
+                        size_t tread = static_cast<size_t>(sf.gcount());
+                        std::cout << "Last " << tread << " bytes:\n";
+                        print_hexdump(tbuf, tread);
+                        std::ostringstream ts;
+                        ts << std::uppercase << std::hex << std::setfill('0');
+                        for (size_t i = 0; i < tread; ++i)
+                            ts << std::setw(2) << static_cast<int>(tbuf[i]);
+                        hex_tail = ts.str();
+                        std::cout << "  hex_tail: " << hex_tail << "\n";
+                    }
+                }
+            }
+        } else {
+            // Manual hex entry
+            std::cout << "Enter hex_head manually (e.g. 25504446, Enter to skip): ";
+            std::getline(std::cin, hex_head);
+        }
+
+        // Optional text_pattern
+        std::cout << "Text pattern / regex substring for refinement (Enter to skip): ";
+        std::getline(std::cin, text_pattern);
+    } else {
+        // 6. Text type — regex pattern
+        std::cout << "Regex pattern: ";
+        std::getline(std::cin, text_pattern);
+    }
+
+    // 7. Extensions
+    std::string ext_str;
+    std::cout << "Extensions comma-separated (e.g. .myf,.myfmt, Enter for none): ";
+    std::getline(std::cin, ext_str);
+    std::vector<std::string> extensions;
+    if (!ext_str.empty()) {
+        std::istringstream iss(ext_str);
+        std::string token;
+        while (std::getline(iss, token, ',')) {
+            // trim whitespace
+            auto b = token.find_first_not_of(" \t");
+            auto e = token.find_last_not_of(" \t");
+            if (b != std::string::npos)
+                extensions.push_back(token.substr(b, e - b + 1));
+        }
+    }
+
+    // 8. deduct_from
+    std::string deduct_from;
+    std::cout << "Deduct from (existing name, Enter to skip): ";
+    std::getline(std::cin, deduct_from);
+
+    // 9. Build JSON object
+    nlohmann::json new_sig;
+    new_sig["name"] = sig_name;
+    new_sig["type"] = is_binary ? "binary" : "text";
+    new_sig["extensions"] = extensions;
+    if (!hex_head.empty())    new_sig["hex_head"] = hex_head;
+    if (!hex_tail.empty())    new_sig["hex_tail"] = hex_tail;
+    if (!text_pattern.empty()) {
+        if (is_binary) new_sig["text_pattern"] = text_pattern;
+        else           new_sig["pattern"]       = text_pattern;
+    }
+    if (!deduct_from.empty()) new_sig["deduct_from"] = deduct_from;
+
+    // Preview
+    std::cout << "\nPreview:\n" << new_sig.dump(4) << "\n\n";
+
+    // Confirm
+    std::string confirm;
+    std::cout << "Append to " << config_path << "? [y/N]: ";
+    std::getline(std::cin, confirm);
+    if (confirm != "y" && confirm != "Y") {
+        std::cout << "Cancelled.\n";
+        return 0;
+    }
+
+    arr.push_back(new_sig);
+
+    std::ofstream out(config_path);
+    if (!out.is_open()) {
+        std::cerr << "Error: cannot write to " << config_path << "\n";
+        return 1;
+    }
+    out << arr.dump(4) << "\n";
+    std::cout << "Saved to " << config_path << "\n";
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
 
 void print_ui_help() {
     std::cout << "\n"
@@ -31,6 +247,7 @@ void print_ui_help() {
         << "  --output-json <path>       Export JSON report to path\n"
         << "  --output-txt <path>        Export TXT report to path\n"
         << "  --no-report                Skip report generation\n"
+        << "  --add-sig                  Interactive wizard to add a new signature\n"
         << "==================================================================\n";
 }
 
@@ -44,7 +261,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // Handle -h/--help/--version before treating argv[1] as a path
+    // Handle -h/--help/--version/--add-sig before treating argv[1] as a path
     {
         std::string first = argv[1];
         if (first == "-h" || first == "--help") {
@@ -54,6 +271,13 @@ int main(int argc, char* argv[]) {
         if (first == "--version") {
             std::cout << "DevScan 1.0.0\n";
             return 0;
+        }
+        if (first == "--add-sig") {
+            std::string cfg = "signatures.json";
+            for (int i = 2; i + 1 < argc; ++i)
+                if (std::string(argv[i]) == "-c" || std::string(argv[i]) == "--config")
+                    cfg = argv[i + 1];
+            return run_add_sig_wizard(cfg);
         }
     }
 

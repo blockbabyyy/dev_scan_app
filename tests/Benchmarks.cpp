@@ -7,6 +7,7 @@
 #include <memory>
 #include <iomanip>
 #include <map>
+#include <unordered_map>
 #include <algorithm>
 
 #include "Scanner.h"
@@ -18,6 +19,7 @@ namespace fs = std::filesystem;
 
 // Сигнатуры загружаются из JSON — единый источник истины
 static std::vector<SignatureDefinition> g_sigs;
+static std::unordered_map<std::string, std::string> g_ext_to_type;
 
 struct FileEntry {
     std::string name;
@@ -63,7 +65,8 @@ void LoadDataset(const fs::path& folder, double mix_ratio) {
 
             g_total_bytes += size;
 
-            std::string type = ext_to_type(fe.extension);
+            auto _it0 = g_ext_to_type.find(fe.extension);
+            std::string type = (_it0 != g_ext_to_type.end()) ? _it0->second : "";
             if (!type.empty()) g_expected_stats.add(type);
             g_expected_stats.total_files_processed++;
 
@@ -75,7 +78,8 @@ void LoadDataset(const fs::path& folder, double mix_ratio) {
 }
 
 bool IsCorrectDetection(const std::string& ext, const ScanStats& st, bool strict_mode) {
-    std::string key = ext_to_type(ext);
+    auto _it1 = g_ext_to_type.find(ext);
+    std::string key = (_it1 != g_ext_to_type.end()) ? _it1->second : "";
     if (key.empty()) return false;
     if (GetStat(st, key) == 0) return false;
 
@@ -118,7 +122,8 @@ void VerifyAll(bool strict) {
             s->scan(file.content.data(), file.content.size(), st);
 
             if (IsCorrectDetection(file.extension, st, strict)) {
-                std::string type = ext_to_type(file.extension);
+                auto _it2 = g_ext_to_type.find(file.extension);
+                std::string type = (_it2 != g_ext_to_type.end()) ? _it2->second : "";
                 if (!type.empty()) matched_stats.add(type);
             }
         }
@@ -162,6 +167,7 @@ int main(int argc, char** argv) {
         std::cerr << "[Fatal] Failed to load signatures.json\n";
         return 1;
     }
+    g_ext_to_type = build_ext_to_type(g_sigs);
 
     std::cout << ">>> Preparing Benchmark Data (Mix=0.2)...\n";
     LoadDataset("bench_data_stress", 0.2);

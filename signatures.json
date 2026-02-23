@@ -2,69 +2,81 @@
     {
         "name": "PDF",
         "type": "binary",
+        "extensions": [".pdf"],
         "hex_head": "25504446",
         "hex_tail": "2525454F46"
     },
     {
         "name": "ZIP",
         "type": "binary",
+        "extensions": [".zip"],
         "hex_head": "504B0304",
         "hex_tail": "504B0506"
     },
     {
         "name": "RAR4",
         "type": "binary",
+        "extensions": [".rar"],
         "hex_head": "526172211A0700"
     },
     {
         "name": "RAR5",
         "type": "binary",
+        "extensions": [".rar5"],
         "hex_head": "526172211A070100"
     },
     {
         "name": "PNG",
         "type": "binary",
+        "extensions": [".png"],
         "hex_head": "89504E470D0A1A0A",
         "hex_tail": "49454E44AE426082"
     },
     {
         "name": "JPG",
         "type": "binary",
+        "extensions": [".jpg"],
         "hex_head": "FFD8FF",
         "hex_tail": "FFD9"
     },
     {
         "name": "GIF",
         "type": "binary",
+        "extensions": [".gif"],
         "hex_head": "47494638",
         "hex_tail": "3B"
     },
     {
         "name": "BMP",
         "type": "binary",
+        "extensions": [".bmp"],
         "hex_head": "424D",
         "hex_tail": "00000000"
     },
     {
         "name": "MKV",
         "type": "binary",
+        "extensions": [".mkv"],
         "hex_head": "1A45DFA3"
     },
     {
         "name": "MP3",
         "type": "binary",
+        "extensions": [".mp3"],
         "hex_head": "494433"
     },
 
     {
         "name": "OLE",
         "type": "binary",
+        "extensions": [],
         "hex_head": "D0CF11E0A1B11AE1"
     },
 
     {
         "name": "DOC",
         "type": "binary",
+        "extensions": [".doc"],
         "hex_head": "D0CF11E0A1B11AE1",
         "text_pattern": "WordDocument",
         "deduct_from": "OLE"
@@ -72,6 +84,7 @@
     {
         "name": "XLS",
         "type": "binary",
+        "extensions": [".xls"],
         "hex_head": "D0CF11E0A1B11AE1",
         "text_pattern": "Workbook",
         "deduct_from": "OLE"
@@ -79,6 +92,7 @@
     {
         "name": "PPT",
         "type": "binary",
+        "extensions": [".ppt"],
         "hex_head": "D0CF11E0A1B11AE1",
         "text_pattern": "PowerPoint Document",
         "deduct_from": "OLE"
@@ -87,6 +101,7 @@
     {
         "name": "DOCX",
         "type": "binary",
+        "extensions": [".docx"],
         "hex_head": "504B0304",
         "text_pattern": "word/document.xml",
         "deduct_from": "ZIP"
@@ -94,6 +109,7 @@
     {
         "name": "XLSX",
         "type": "binary",
+        "extensions": [".xlsx"],
         "hex_head": "504B0304",
         "text_pattern": "xl/workbook.xml",
         "deduct_from": "ZIP"
@@ -101,6 +117,7 @@
     {
         "name": "PPTX",
         "type": "binary",
+        "extensions": [".pptx"],
         "hex_head": "504B0304",
         "text_pattern": "ppt/presentation.xml",
         "deduct_from": "ZIP"
@@ -109,32 +126,38 @@
     {
         "name": "7Z",
         "type": "binary",
+        "extensions": [".7z"],
         "hex_head": "377ABCAF271C"
     },
     {
         "name": "GZIP",
         "type": "binary",
+        "extensions": [".gz"],
         "hex_head": "1F8B"
     },
     {
         "name": "PE",
         "type": "binary",
+        "extensions": [".exe", ".dll"],
         "hex_head": "4D5A",
         "text_pattern": "PE"
     },
     {
         "name": "SQLITE",
         "type": "binary",
+        "extensions": [".sqlite", ".db"],
         "hex_head": "53514C69746520666F726D6174203300"
     },
     {
         "name": "FLAC",
         "type": "binary",
+        "extensions": [".flac"],
         "hex_head": "664C6143"
     },
     {
         "name": "WAV",
         "type": "binary",
+        "extensions": [".wav"],
         "hex_head": "52494646",
         "text_pattern": "WAVE"
     },
@@ -142,21 +165,25 @@
     {
         "name": "JSON",
         "type": "text",
+        "extensions": [".json"],
         "pattern": "\\{\\s*\"[^\"]+\"\\s*:"
     },
     {
         "name": "HTML",
         "type": "text",
+        "extensions": [".html"],
         "pattern": "<html.*?</html>"
     },
     {
         "name": "XML",
         "type": "text",
+        "extensions": [".xml"],
         "pattern": "<\\?xml"
     },
     {
         "name": "EMAIL",
         "type": "text",
+        "extensions": [".eml"],
         "pattern": "From:\\s.+\\r?\\n(?:To|Subject|Date|MIME-Version):"
     }
 ]

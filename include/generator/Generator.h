@@ -2,10 +2,12 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include "Scanner.h"
+#include "TypeMap.h"
 
 using GenStats = ScanStats;
 
@@ -48,4 +50,7 @@ private:
 
     uint32_t calculate_crc32(const std::string& data);
     void update_stats(const std::string& ext, GenStats& stats);
+
+    std::unordered_map<std::string, std::string> m_ext_to_type;
+    std::unordered_map<std::string, std::string> m_type_to_ext;
 };

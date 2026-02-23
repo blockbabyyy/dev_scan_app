@@ -7,7 +7,6 @@
 
 #include "Scanner.h"
 #include "ConfigLoader.h"
-#include "TypeMap.h"
 #include "generator/Generator.h"
 #include <boost/iostreams/device/mapped_file.hpp>
 

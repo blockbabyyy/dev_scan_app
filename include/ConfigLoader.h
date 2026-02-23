@@ -64,6 +64,11 @@ public:
                     }
                 }
 
+                if (item.contains("extensions")) {
+                    for (const auto& e : item["extensions"])
+                        def.extensions.push_back(e.get<std::string>());
+                }
+
                 if (item.contains("deduct_from")) {
                     def.deduct_from = item["deduct_from"].get<std::string>();
                 }
