@@ -7,6 +7,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <mutex>
 
 class Logger {
 public:
@@ -22,6 +23,7 @@ public:
     static std::string path() { return instance().m_path; }
 
 private:
+    std::mutex m_mutex;
     std::ofstream m_file;
     std::string m_path;
 
@@ -68,6 +70,7 @@ private:
 
     void log(const char* level, const std::string& msg, bool also_stderr) {
         std::string line = "[" + timestamp() + "] [" + level + "] " + msg;
+        std::lock_guard<std::mutex> lock(m_mutex);
         if (m_file.is_open()) {
             m_file << line << "\n";
             m_file.flush();

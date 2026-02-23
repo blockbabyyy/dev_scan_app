@@ -3,7 +3,7 @@
 #include <fstream>
 #include <iomanip>
 #include <nlohmann/json.hpp>
-#include "Scaner.h"
+#include "Scanner.h"
 
 class ReportWriter {
 public:

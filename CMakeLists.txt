@@ -43,7 +43,7 @@ endif()
 
 # === 3. БИБЛИОТЕКА (CORE) ===
 add_library(DevScanCore STATIC
-    src/Scaner.cpp
+    src/Scanner.cpp
 )
 
 target_include_directories(DevScanCore PUBLIC 
@@ -75,7 +75,7 @@ configure_file(signatures.json signatures.json COPYONLY)
 enable_testing()
 
 add_executable(DevScanTests
-    tests/ScanerTests.cpp
+    tests/ScannerTests.cpp
     tests/IntegrationTests.cpp     
     src/generator/Generator.cpp    
 )

@@ -1,9 +1,10 @@
-﻿#include "Scaner.h"
+#include "Scanner.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
 #include <re2/re2.h>
+#include <re2/set.h>
 #include <hs/hs.h>
 
 namespace {
@@ -34,8 +35,13 @@ namespace {
 
         if (!head.empty() && !tail.empty()) return head + ".*?" + tail;
         if (!head.empty() && !def.text_pattern.empty()) return head + ".*?" + def.text_pattern;
+        if (!head.empty()) return head;
 
-        return head;
+        // Fallback: head пуст, но есть text_pattern или tail
+        if (!def.text_pattern.empty()) return def.text_pattern;
+        if (!tail.empty()) return tail;
+
+        return "";
     }
 }
 
@@ -53,10 +59,12 @@ std::string BoostScanner::name() const { return "Boost.Regex"; }
 void BoostScanner::prepare(const std::vector<SignatureDefinition>& sigs) {
     m_regexes.clear();
     for (const auto& s : sigs) {
+        std::string pat = build_pattern(s);
+        if (pat.empty()) continue;
         try {
             auto flags = boost::regex::optimize | boost::regex::mod_s;
             if (s.type == SignatureType::TEXT) flags |= boost::regex::icase;
-            m_regexes.emplace_back(boost::regex(build_pattern(s), flags), s.name);
+            m_regexes.emplace_back(boost::regex(pat, flags), s.name);
         }
         catch (const std::exception& e) {
             std::cerr << "[BoostScanner] Failed to compile pattern for '"
@@ -71,27 +79,75 @@ void BoostScanner::scan(const char* data, size_t size, ScanStats& stats) {
         const char* cur = data;
         while (cur < end && boost::regex_search(cur, end, m, re)) {
             stats.add(name);
-            cur += m.position() + std::max((std::ptrdiff_t)1, m.length());
+            cur += m.position() + std::max(static_cast<std::ptrdiff_t>(1), m.length());
         }
     }
 }
 
-// === RE2 ===
+// === RE2 (two-phase: Set filter → individual count) ===
 Re2Scanner::Re2Scanner() = default;
-Re2Scanner::~Re2Scanner() = default;
+Re2Scanner::~Re2Scanner() {
+    delete static_cast<re2::RE2::Set*>(m_set);
+}
 std::string Re2Scanner::name() const { return "Google RE2"; }
+
 void Re2Scanner::prepare(const std::vector<SignatureDefinition>& sigs) {
+    delete static_cast<re2::RE2::Set*>(m_set);
+    m_set = nullptr;
+    m_sig_names.clear();
     m_regexes.clear();
-    re2::RE2::Options opt;
-    opt.set_encoding(re2::RE2::Options::EncodingLatin1);
-    opt.set_dot_nl(true);
+
+    // Build individual regexes (for phase 2 counting)
     for (const auto& s : sigs) {
-        auto re = std::make_unique<re2::RE2>(build_pattern(s), opt);
-        if (re->ok()) m_regexes.emplace_back(std::move(re), s.name);
+        std::string pat = build_pattern(s);
+        if (pat.empty()) continue;
+
+        re2::RE2::Options opt;
+        opt.set_encoding(re2::RE2::Options::EncodingLatin1);
+        opt.set_dot_nl(true);
+        if (s.type == SignatureType::TEXT) opt.set_case_sensitive(false);
+        auto re = std::make_unique<re2::RE2>(pat, opt);
+        if (re->ok()) {
+            m_regexes.emplace_back(std::move(re), s.name);
+            m_sig_names.push_back(s.name);
+        }
+    }
+
+    // Build RE2::Set (for phase 1 filtering)
+    re2::RE2::Options set_opt;
+    set_opt.set_encoding(re2::RE2::Options::EncodingLatin1);
+    set_opt.set_dot_nl(true);
+    auto* set = new re2::RE2::Set(set_opt, re2::RE2::UNANCHORED);
+
+    for (const auto& [re, sig_name] : m_regexes) {
+        std::string err;
+        set->Add(re->pattern(), &err);
+    }
+    if (set->Compile()) {
+        m_set = set;
+    } else {
+        delete set;
     }
 }
+
 void Re2Scanner::scan(const char* data, size_t size, ScanStats& stats) {
-    for (const auto& [re, name] : m_regexes) {
+    auto* set = static_cast<re2::RE2::Set*>(m_set);
+    if (!set) {
+        // Fallback: no set compiled, scan all individually
+        for (const auto& [re, name] : m_regexes) {
+            re2::StringPiece input(data, size);
+            while (re2::RE2::FindAndConsume(&input, *re)) stats.add(name);
+        }
+        return;
+    }
+
+    // Phase 1: fast filter — which patterns match at all?
+    std::vector<int> matched_ids;
+    set->Match(re2::StringPiece(data, size), &matched_ids);
+
+    // Phase 2: count matches only for patterns that were found
+    for (int id : matched_ids) {
+        const auto& [re, name] = m_regexes[id];
         re2::StringPiece input(data, size);
         while (re2::RE2::FindAndConsume(&input, *re)) stats.add(name);
     }
@@ -114,16 +170,18 @@ void HsScanner::prepare(const std::vector<SignatureDefinition>& sigs) {
     std::vector<unsigned int> flags, ids;
 
     for (size_t i = 0; i < sigs.size(); ++i) {
-        m_temp_patterns.push_back(build_pattern(sigs[i]));
+        std::string pat = build_pattern(sigs[i]);
+        if (pat.empty()) continue;
+        m_temp_patterns.push_back(pat);
         m_sig_names.push_back(sigs[i].name);
         exprs.push_back(m_temp_patterns.back().c_str());
-        ids.push_back((unsigned int)i);
+        ids.push_back(static_cast<unsigned int>(m_sig_names.size() - 1));
         flags.push_back(HS_FLAG_DOTALL | (sigs[i].type == SignatureType::TEXT ? HS_FLAG_CASELESS : 0));
     }
 
     if (exprs.empty()) return;
     hs_compile_error_t* err;
-    if (hs_compile_multi(exprs.data(), flags.data(), ids.data(), (unsigned int)exprs.size(), HS_MODE_BLOCK, nullptr, &db, &err) != HS_SUCCESS) {
+    if (hs_compile_multi(exprs.data(), flags.data(), ids.data(), static_cast<unsigned int>(exprs.size()), HS_MODE_BLOCK, nullptr, &db, &err) != HS_SUCCESS) {
         std::cerr << "[Scanner] HS Compile Error: " << err->message << std::endl;
         hs_free_compile_error(err);
     }
@@ -135,9 +193,9 @@ void HsScanner::scan(const char* data, size_t size, ScanStats& stats) {
     if (!db || !scratch) return;
     struct Ctx { ScanStats* s; const std::vector<std::string>* n; } ctx = { &stats, &m_sig_names };
     auto on_match = [](unsigned int id, unsigned long long, unsigned long long, unsigned int, void* ptr) -> int {
-        Ctx* c = (Ctx*)ptr;
+        auto* c = static_cast<Ctx*>(ptr);
         if (id < c->n->size()) c->s->add((*c->n)[id]);
         return 0;
-        };
+    };
     hs_scan(db, data, size, 0, scratch, on_match, &ctx);
 }

@@ -9,7 +9,7 @@
 #include <map>
 #include <algorithm>
 
-#include "Scaner.h"
+#include "Scanner.h"
 #include "ConfigLoader.h"
 #include "TypeMap.h"
 #include "generator/Generator.h"
@@ -140,9 +140,8 @@ void BM_Scan(benchmark::State& state) {
     size_t start_idx = state.thread_index() * batch_size;
     size_t end_idx = std::min(start_idx + batch_size, total_files);
 
-    ScanStats stats;
-
     for (auto _ : state) {
+        ScanStats stats;
         for (size_t i = start_idx; i < end_idx; ++i) {
             scanner->scan(g_files[i].content.data(), g_files[i].content.size(), stats);
         }

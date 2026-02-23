@@ -42,7 +42,8 @@
     {
         "name": "BMP",
         "type": "binary",
-        "hex_head": "424D"
+        "hex_head": "424D",
+        "text_pattern": "\\x00\\x00\\x00\\x00"
     },
     {
         "name": "MKV",
@@ -123,6 +124,6 @@
     {
         "name": "EMAIL",
         "type": "text",
-        "pattern": "From:\\s"
+        "pattern": "From:\\s.+\\r?\\n(?:To|Subject|Date|MIME-Version):"
     }
 ]

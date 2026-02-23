@@ -1,17 +1,19 @@
-﻿#include <gtest/gtest.h>
+#include <gtest/gtest.h>
 #include <filesystem>
 #include <vector>
 #include <string>
 #include <map>
 #include <algorithm>
 
-#include "Scaner.h"
+#include "Scanner.h"
 #include "ConfigLoader.h"
 #include "TypeMap.h"
 #include "generator/Generator.h"
 #include <boost/iostreams/device/mapped_file.hpp>
 
 namespace fs = std::filesystem;
+
+static constexpr uint32_t TEST_SEED = 42;
 
 class IntegrationTest : public ::testing::Test {
 protected:
@@ -24,8 +26,7 @@ protected:
         ASSERT_FALSE(sigs.empty()) << "Failed to load signatures.json";
         scanner = Scanner::create(EngineType::HYPERSCAN);
         scanner->prepare(sigs);
-        std::random_device rd;
-        temp_dir = fs::temp_directory_path() / ("devscan_int_" + std::to_string(rd()));
+        temp_dir = fs::temp_directory_path() / ("devscan_int_" + std::to_string(TEST_SEED));
         fs::create_directories(temp_dir);
     }
 
@@ -45,7 +46,7 @@ protected:
                 if (mmap.is_open()) scanner->scan(mmap.data(), mmap.size(), stats);
             }
             catch (...) {}
-            };
+        };
 
         if (fs::is_directory(path)) {
             auto opts = fs::directory_options::skip_permission_denied;
@@ -61,11 +62,10 @@ protected:
 
 TEST_F(IntegrationTest, Folder_Scan_With_Generator) {
     DataSetGenerator gen;
-    GenStats expected = gen.generate_count(temp_dir, 50, OutputMode::FOLDER, 0.0);
+    GenStats expected = gen.generate_count(temp_dir, 50, OutputMode::FOLDER, 0.0, TEST_SEED);
     ScanStats actual = ScanPath(temp_dir);
 
-    // Вывод отладочного отчета
-    std::cout << "--- Scan Report ---\n";
+    std::cout << "--- Scan Report (seed=" << TEST_SEED << ") ---\n";
     for (auto const& [name, count] : actual.counts) std::cout << name << ": " << count << "\n";
 
     for (auto const& [type_name, count] : expected.counts) {
@@ -78,19 +78,18 @@ TEST_F(IntegrationTest, Folder_Scan_With_Generator) {
 TEST_F(IntegrationTest, Zip_Archive_Internal_Scan) {
     DataSetGenerator gen;
     fs::path zip_path = temp_dir / "internal_test.zip";
-    gen.generate_count(zip_path, 20, OutputMode::ZIP, 0.0);
+    gen.generate_count(zip_path, 20, OutputMode::ZIP, 0.0, TEST_SEED);
     ScanStats actual = ScanPath(zip_path);
-    // ZIP-паттерн с head+tail (PK0304...PK0506) — считает ZIP-структуры, не записи
     EXPECT_GE(GetCount(actual, "ZIP"), 1) << "ZIP archive not detected at all";
 }
 
 TEST_F(IntegrationTest, Bin_Concat_Scan) {
     DataSetGenerator gen;
     fs::path bin_path = temp_dir / "concat_test.bin";
-    GenStats expected = gen.generate_count(bin_path, 30, OutputMode::BIN, 0.0);
+    GenStats expected = gen.generate_count(bin_path, 30, OutputMode::BIN, 0.0, TEST_SEED);
     ScanStats actual = ScanPath(bin_path);
 
-    std::cout << "--- BIN Scan Report ---\n";
+    std::cout << "--- BIN Scan Report (seed=" << TEST_SEED << ") ---\n";
     for (auto const& [name, count] : actual.counts) std::cout << name << ": " << count << "\n";
 
     for (auto const& [type_name, count] : expected.counts) {
@@ -103,10 +102,10 @@ TEST_F(IntegrationTest, Bin_Concat_Scan) {
 TEST_F(IntegrationTest, Pcap_Dump_Scan) {
     DataSetGenerator gen;
     fs::path pcap_path = temp_dir / "dump_test.pcap";
-    GenStats expected = gen.generate_count(pcap_path, 30, OutputMode::PCAP, 0.0);
+    GenStats expected = gen.generate_count(pcap_path, 30, OutputMode::PCAP, 0.0, TEST_SEED);
     ScanStats actual = ScanPath(pcap_path);
 
-    std::cout << "--- PCAP Scan Report ---\n";
+    std::cout << "--- PCAP Scan Report (seed=" << TEST_SEED << ") ---\n";
     for (auto const& [name, count] : actual.counts) std::cout << name << ": " << count << "\n";
 
     for (auto const& [type_name, count] : expected.counts) {

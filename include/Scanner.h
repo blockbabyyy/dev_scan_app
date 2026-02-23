@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <string>
 #include <vector>
 #include <map>
@@ -18,7 +18,7 @@ struct SignatureDefinition {
     std::string hex_tail;
     std::string text_pattern;
     SignatureType type = SignatureType::BINARY;
-    std::string deduct_from; // Для логики вычитания коллизий
+    std::string deduct_from;
 };
 
 struct ScanStats {
@@ -44,7 +44,6 @@ public:
     static std::unique_ptr<Scanner> create(EngineType type);
 };
 
-// Реализации (Boost, RE2, Hs) определяются в Scaner.cpp
 class BoostScanner : public Scanner {
 public:
     void prepare(const std::vector<SignatureDefinition>& sigs) override;
@@ -62,6 +61,8 @@ public:
     void scan(const char* data, size_t size, ScanStats& stats) override;
     std::string name() const override;
 private:
+    void* m_set = nullptr; // RE2::Set* (opaque — nested class, can't forward-declare)
+    std::vector<std::string> m_sig_names;
     std::vector<std::pair<std::unique_ptr<re2::RE2>, std::string>> m_regexes;
 };
 

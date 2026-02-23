@@ -3,12 +3,12 @@
 #include <unordered_map>
 
 // Единственный источник маппинга расширение -> имя типа для всего проекта.
-// Используется в Generator::update_stats(), IntegrationTests, Benchmarks.
 inline const std::unordered_map<std::string, std::string>& ext_to_type_map() {
     static const std::unordered_map<std::string, std::string> m = {
         {".pdf",  "PDF"},
         {".zip",  "ZIP"},
         {".rar",  "RAR4"},
+        {".rar5", "RAR5"},
         {".doc",  "DOC"},
         {".xls",  "XLS"},
         {".ppt",  "PPT"},
@@ -33,4 +33,16 @@ inline std::string ext_to_type(const std::string& ext) {
     auto& m = ext_to_type_map();
     auto it = m.find(ext);
     return (it != m.end()) ? it->second : "";
+}
+
+// Обратный маппинг: имя типа -> расширение
+inline const std::unordered_map<std::string, std::string>& type_to_ext_map() {
+    static const std::unordered_map<std::string, std::string> m = [] {
+        std::unordered_map<std::string, std::string> result;
+        for (const auto& [ext, name] : ext_to_type_map()) {
+            result.emplace(name, ext);
+        }
+        return result;
+    }();
+    return m;
 }

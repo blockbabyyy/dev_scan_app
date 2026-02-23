@@ -1,5 +1,6 @@
-﻿#include "generator/Generator.h"
+#include "generator/Generator.h"
 #include "TypeMap.h"
+#include "ConfigLoader.h"
 #include <iostream>
 #include <sstream>
 #include <random>
@@ -10,7 +11,7 @@
 static uint32_t crc32_table[256];
 static bool crc_initialized = false;
 
-void init_crc32() {
+static void init_crc32() {
     if (crc_initialized) return;
     for (uint32_t i = 0; i < 256; i++) {
         uint32_t c = i;
@@ -22,18 +23,18 @@ void init_crc32() {
     crc_initialized = true;
 }
 
-// Ловушки
-const std::vector<std::string> TRAPS_BIN = {
-    "\x50\x4B\xFF\xFF",     // Fake ZIP
-    "\x25\x50\x44\x5F",     // Fake PDF
-    "\x47\x49\x46\x39",     // Fake GIF
-    "\xFF\xD8\x00\x00",     // Fake JPG
+// Ловушки (false-positive bait)
+static const std::vector<std::string> TRAPS_BIN = {
+    "\x50\x4B\xFF\xFF",
+    "\x25\x50\x44\x5F",
+    "\x47\x49\x46\x39",
+    "\xFF\xD8\x00\x00",
     "WordDoc_ment",
     "Workbuuk",
     "PowerPoint Fakument"
 };
 
-const std::vector<std::string> TRAPS_TEXT = {
+static const std::vector<std::string> TRAPS_TEXT = {
     "<hmtl fake='yes'>",
     "{\"fake_json\"; 1}",
     "Subject- Fake",
@@ -42,60 +43,25 @@ const std::vector<std::string> TRAPS_TEXT = {
     "GIF89a_fake"
 };
 
-// Константы сигнатур (так как Signatures.h удален)
-namespace Sig {
-    const std::string ZIP_HEAD = "\x50\x4B\x03\x04";
-    const std::string ZIP_TAIL = "\x50\x4B\x05\x06";
-    // [FIX] Explicit length to preserve trailing \x00 byte
-    const std::string RAR4("\x52\x61\x72\x21\x1A\x07\x00", 7);
-    const std::string PNG_HEAD = "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A";
-    const std::string PNG_TAIL = "\x49\x45\x4E\x44\xAE\x42\x60\x82";
-    const std::string JPG_HEAD = "\xFF\xD8\xFF";
-    const std::string JPG_TAIL = "\xFF\xD9";
-    const std::string GIF_HEAD = "\x47\x49\x46\x38"; // GIF8
-    const std::string PDF_HEAD = "\x25\x50\x44\x46"; // %PDF
-    const std::string PDF_TAIL = "\x25\x25\x45\x4F\x46"; // %%EOF
-    const std::string MP3 = "\x49\x44\x33"; // ID3
-    const std::string MKV = "\x1A\x45\xDF\xA3";
-    const std::string OLE = "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1";
-    // [FIX] Use text stream names matching the scanner signatures
-    const std::string OLE_WORD = "WordDocument";
-    const std::string OLE_XL = "Workbook";
-    const std::string OLE_PPT = "PowerPoint Document";
-
-    // XML based
-    const std::string XML_WORD = "word/document.xml";
-    const std::string XML_XL = "xl/workbook.xml";
-    const std::string XML_PPT = "ppt/presentation.xml";
+// Конвертация hex-строки из signatures.json в бинарные байты
+static std::string hex_to_bytes(const std::string& hex) {
+    std::string result;
+    result.reserve(hex.length() / 2);
+    for (size_t i = 0; i + 1 < hex.length(); i += 2) {
+        unsigned int byte;
+        if (std::sscanf(hex.c_str() + i, "%2x", &byte) == 1) {
+            result.push_back(static_cast<char>(byte));
+        }
+    }
+    return result;
 }
 
-DataSetGenerator::DataSetGenerator() {
+DataSetGenerator::DataSetGenerator(const std::string& config_path) {
     init_crc32();
+    load_signatures(config_path);
+    add_text_templates();
 
-    types[".zip"] = { ".zip", Sig::ZIP_HEAD, "", Sig::ZIP_TAIL, false };
-    types[".rar"] = { ".rar", Sig::RAR4, "", "", false };
-    types[".png"] = { ".png", Sig::PNG_HEAD, "", Sig::PNG_TAIL, false };
-    types[".jpg"] = { ".jpg", Sig::JPG_HEAD, "", Sig::JPG_TAIL, false };
-    types[".gif"] = { ".gif", Sig::GIF_HEAD, "", std::string("\x00\x3B", 2), false };
-    types[".bmp"] = { ".bmp", std::string("\x42\x4D\x36\x00\x0C\x00\x00\x00", 8), "", "", false };
-    types[".mkv"] = { ".mkv", Sig::MKV, "", "", false };
-    types[".mp3"] = { ".mp3", Sig::MP3, "", "", false };
-
-    types[".doc"] = { ".doc", Sig::OLE, Sig::OLE_WORD, "", false };
-    types[".xls"] = { ".xls", Sig::OLE, Sig::OLE_XL,   "", false };
-    types[".ppt"] = { ".ppt", Sig::OLE, Sig::OLE_PPT,  "", false };
-
-    types[".docx"] = { ".docx", Sig::ZIP_HEAD, Sig::XML_WORD, Sig::ZIP_TAIL, false };
-    types[".xlsx"] = { ".xlsx", Sig::ZIP_HEAD, Sig::XML_XL,   Sig::ZIP_TAIL, false };
-    types[".pptx"] = { ".pptx", Sig::ZIP_HEAD, Sig::XML_PPT,  Sig::ZIP_TAIL, false };
-
-    types[".pdf"] = { ".pdf", Sig::PDF_HEAD, "", Sig::PDF_TAIL, false };
-    types[".json"] = { ".json", "{ \"k\": ", "", " }", true };
-    types[".html"] = { ".html", "<html><body>", "", "</body></html>", true };
-    types[".xml"] = { ".xml", "<?xml version=\"1.0\"?>", "", "", true };
-    types[".eml"] = { ".eml", "From: user@loc", "", "", true };
-
-    for (const auto& kv : types) extensions.push_back(kv.first);
+    for (const auto& [ext, _] : types) extensions.push_back(ext);
 
     dictionary = {
         "lorem", "ipsum", "dolor", "sit", "amet", "consectetur", "adipiscing", "elit",
@@ -104,6 +70,45 @@ DataSetGenerator::DataSetGenerator() {
         "http://example.com", "user@domain.org", "127.0.0.1", "path/to/file",
         "debug", "error", "info", "warning", "trace", "fatal"
     };
+}
+
+void DataSetGenerator::load_signatures(const std::string& config_path) {
+    auto sigs = ConfigLoader::load(config_path);
+    auto& type_ext = type_to_ext_map();
+
+    for (const auto& sig : sigs) {
+        if (sig.type == SignatureType::TEXT) continue; // текстовые шаблоны добавляем вручную
+
+        auto it = type_ext.find(sig.name);
+        if (it == type_ext.end()) continue; // нет расширения — пропускаем (OLE, RAR5 без .rar5)
+
+        const std::string& ext = it->second;
+
+        FileType ft;
+        ft.extension = ext;
+        ft.head = hex_to_bytes(sig.hex_head);
+        ft.middle = sig.text_pattern; // "WordDocument", "word/document.xml", etc.
+        ft.tail = hex_to_bytes(sig.hex_tail);
+        ft.is_text = false;
+
+        // Спецкейсы: BMP нуждается в полном 14-байтном заголовке
+        if (sig.name == "BMP") {
+            ft.head = std::string("\x42\x4D\x36\x00\x0C\x00\x00\x00\x00\x00\x36\x00\x00\x00", 14);
+            ft.middle.clear(); // text_pattern в BMP — для сканера, не для генератора
+        }
+        // GIF: tail в hex — 003B, но нужен бинарный \x00\x3B
+        // (hex_to_bytes уже правильно конвертирует)
+
+        types[ext] = ft;
+    }
+}
+
+void DataSetGenerator::add_text_templates() {
+    // Текстовые типы нельзя строить из regex-паттернов — нужен структурный шаблон
+    types[".json"] = { ".json", "{ \"k\": ", "", " }", true };
+    types[".html"] = { ".html", "<html><body>", "", "</body></html>", true };
+    types[".xml"]  = { ".xml", "<?xml version=\"1.0\"?>", "", "", true };
+    types[".eml"]  = { ".eml", "From: user@local\nTo: dest@local\nSubject: test\n\n", "", "", true };
 }
 
 size_t DataSetGenerator::get_realistic_size(const std::string& ext, std::mt19937& rng) {
@@ -115,7 +120,7 @@ size_t DataSetGenerator::get_realistic_size(const std::string& ext, std::mt19937
         return d(rng);
     }
     else if (ext == ".mkv" || ext == ".mp3") {
-        std::uniform_int_distribution<size_t> d(1 * 1024 * 1024, 5 * 1024 * 1024); // Чуть меньше для тестов
+        std::uniform_int_distribution<size_t> d(1 * 1024 * 1024, 5 * 1024 * 1024);
         return d(rng);
     }
     else {
@@ -171,7 +176,7 @@ void DataSetGenerator::fill_complex(std::stringstream& ss, size_t count, bool is
                 written += trap.size();
             }
             else {
-                ss.put((char)0xCC);
+                ss.put(static_cast<char>(0xCC));
                 written++;
             }
         }
@@ -183,7 +188,7 @@ std::pair<std::string, std::string> DataSetGenerator::create_payload(std::mt1993
     std::stringstream ss;
     std::string primary_ext;
 
-    int parts = is_mixed ? (2 + (rng() % 2)) : 1;
+    int parts = is_mixed ? (2 + static_cast<int>(rng() % 2)) : 1;
 
     for (int p = 0; p < parts; ++p) {
         if (p > 0) fill_complex(ss, 128, false, rng);
@@ -199,7 +204,7 @@ std::pair<std::string, std::string> DataSetGenerator::create_payload(std::mt1993
         if (total_size < overhead + 100) total_size = overhead + 100;
 
         size_t body = total_size - overhead;
-        size_t pre_marker = std::min((size_t)50, body);
+        size_t pre_marker = std::min(static_cast<size_t>(50), body);
         size_t post_marker = body - pre_marker;
 
         fill_complex(ss, pre_marker, t.is_text, rng);
@@ -232,7 +237,7 @@ struct ZipDirHeader { uint32_t sig = 0x02014b50; uint16_t ver_made = 20; uint16_
 struct ZipEOCD { uint32_t sig = 0x06054b50; uint16_t disk_num = 0; uint16_t disk_dir_start = 0; uint16_t num_dir_this = 0; uint16_t num_dir_total = 0; uint32_t size_dir = 0; uint32_t offset_dir = 0; uint16_t comment_len = 0; };
 #pragma pack(pop)
 
-void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t limit, int limit_type, OutputMode mode, double mix_ratio, GenStats& stats) {
+void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t limit, int limit_type, OutputMode mode, double mix_ratio, GenStats& stats, uint32_t seed) {
     if (mode == OutputMode::FOLDER) {
         if (std::filesystem::exists(path)) std::filesystem::remove_all(path);
         std::filesystem::create_directories(path);
@@ -245,11 +250,12 @@ void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t l
     if (mode != OutputMode::FOLDER) {
         f.open(path, std::ios::binary);
         if (mode == OutputMode::PCAP) {
-            PcapGlobalHeader gh; f.write((char*)&gh, sizeof(gh));
+            PcapGlobalHeader gh;
+            f.write(reinterpret_cast<const char*>(&gh), sizeof(gh));
         }
     }
 
-    std::mt19937 rng(std::random_device{}());
+    std::mt19937 rng(seed ? seed : std::random_device{}());
     std::uniform_real_distribution<double> dist_mix(0.0, 1.0);
 
     struct ZipEntry { uint32_t off; uint32_t crc; uint32_t sz; std::string name; };
@@ -257,7 +263,7 @@ void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t l
 
     size_t current_count = 0;
     size_t current_bytes = 0;
-    uint32_t timestamp = (uint32_t)std::time(nullptr);
+    uint32_t timestamp = static_cast<uint32_t>(std::time(nullptr));
 
     while (true) {
         if (limit_type == 0 && current_count >= limit) break;
@@ -278,25 +284,25 @@ void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t l
         }
         else if (mode == OutputMode::PCAP) {
             PcapPacketHeader ph;
-            ph.ts_sec = timestamp + (uint32_t)current_count;
+            ph.ts_sec = timestamp + static_cast<uint32_t>(current_count);
             ph.ts_usec = 0;
-            ph.incl = (uint32_t)data.size();
-            ph.orig = (uint32_t)data.size();
-            f.write((char*)&ph, sizeof(ph));
+            ph.incl = static_cast<uint32_t>(data.size());
+            ph.orig = static_cast<uint32_t>(data.size());
+            f.write(reinterpret_cast<const char*>(&ph), sizeof(ph));
             f.write(data.data(), data.size());
         }
         else if (mode == OutputMode::ZIP) {
-            uint32_t off = (uint32_t)f.tellp();
+            uint32_t off = static_cast<uint32_t>(f.tellp());
             uint32_t crc = calculate_crc32(data);
             ZipLocalHeader lh;
             lh.crc32 = crc;
-            lh.comp_size = (uint32_t)data.size();
-            lh.uncomp_size = (uint32_t)data.size();
-            lh.name_len = (uint16_t)fname.size();
-            f.write((char*)&lh, sizeof(lh));
+            lh.comp_size = static_cast<uint32_t>(data.size());
+            lh.uncomp_size = static_cast<uint32_t>(data.size());
+            lh.name_len = static_cast<uint16_t>(fname.size());
+            f.write(reinterpret_cast<const char*>(&lh), sizeof(lh));
             f.write(fname.data(), fname.size());
             f.write(data.data(), data.size());
-            zip_entries.push_back({ off, crc, (uint32_t)data.size(), fname });
+            zip_entries.push_back({ off, crc, static_cast<uint32_t>(data.size()), fname });
         }
 
         current_count++;
@@ -304,35 +310,36 @@ void DataSetGenerator::write_generic(const std::filesystem::path& path, size_t l
     }
 
     if (mode == OutputMode::ZIP) {
-        uint32_t cd_start = (uint32_t)f.tellp();
+        uint32_t cd_start = static_cast<uint32_t>(f.tellp());
         for (const auto& e : zip_entries) {
             ZipDirHeader dh;
             dh.crc32 = e.crc;
             dh.comp_size = e.sz;
             dh.uncomp_size = e.sz;
-            dh.name_len = (uint16_t)e.name.size();
+            dh.name_len = static_cast<uint16_t>(e.name.size());
             dh.local_offset = e.off;
-            f.write((char*)&dh, sizeof(dh));
+            f.write(reinterpret_cast<const char*>(&dh), sizeof(dh));
             f.write(e.name.data(), e.name.size());
         }
-        uint32_t cd_size = (uint32_t)f.tellp() - cd_start;
+        uint32_t cd_size = static_cast<uint32_t>(f.tellp()) - cd_start;
         ZipEOCD eocd;
-        eocd.num_dir_this = (uint16_t)zip_entries.size();
-        eocd.num_dir_total = (uint16_t)zip_entries.size();
-        eocd.size_dir = cd_size; eocd.offset_dir = cd_start;
-        f.write((char*)&eocd, sizeof(eocd));
+        eocd.num_dir_this = static_cast<uint16_t>(zip_entries.size());
+        eocd.num_dir_total = static_cast<uint16_t>(zip_entries.size());
+        eocd.size_dir = cd_size;
+        eocd.offset_dir = cd_start;
+        f.write(reinterpret_cast<const char*>(&eocd), sizeof(eocd));
     }
 }
 
-GenStats DataSetGenerator::generate_count(const std::filesystem::path& path, int count, OutputMode mode, double mix) {
+GenStats DataSetGenerator::generate_count(const std::filesystem::path& path, int count, OutputMode mode, double mix, uint32_t seed) {
     GenStats stats;
-    write_generic(path, count, 0, mode, mix, stats);
+    write_generic(path, count, 0, mode, mix, stats, seed);
     return stats;
 }
 
-GenStats DataSetGenerator::generate_size(const std::filesystem::path& path, int size_mb, OutputMode mode, double mix) {
+GenStats DataSetGenerator::generate_size(const std::filesystem::path& path, int size_mb, OutputMode mode, double mix, uint32_t seed) {
     GenStats stats;
-    size_t limit_bytes = (size_t)size_mb * 1024 * 1024;
-    write_generic(path, limit_bytes, 1, mode, mix, stats);
+    size_t limit_bytes = static_cast<size_t>(size_mb) * 1024 * 1024;
+    write_generic(path, limit_bytes, 1, mode, mix, stats, seed);
     return stats;
 }
