@@ -6,7 +6,10 @@
 
 - **Три движка сканирования**: [Hyperscan](https://github.com/intel/hyperscan) (по умолчанию), [RE2](https://github.com/google/re2), [Boost.Regex](https://www.boost.org/doc/libs/release/libs/regex/)
 - **27 типов файлов** из коробки (PDF, ZIP, RAR4/5, PNG, JPG, GIF, BMP, MKV, MP3, OLE, DOC, XLS, PPT, DOCX, XLSX, PPTX, JSON, HTML, XML, EMAIL, 7Z, GZIP, PE, SQLITE, FLAC, WAV)
+- **Авто-извлечение архивов** — ZIP/7Z/RAR автоматически распаковываются при сканировании
+- **Детектирование вложений** — PNG/JPG внутри DOCX/PPTX показываются в отдельной секции отчёта
 - **Коррекция коллизий** — DOCX/XLSX/PPTX автоматически вычитаются из ZIP, DOC/XLS/PPT из OLE
+- **Взаимоисключающие сигнатуры** — RAR4/RAR5: показывается только один тип по приоритету
 - **Конфигурируемые сигнатуры** — добавляйте свои типы через `signatures.json` или интерактивным визардом `--add-sig`
 - **Экспорт результатов** — отчёты в JSON и TXT (`crash_report/report.json`, `crash_report/report.txt`)
 - **Логирование** — лог-файл в `crash_report/devscan_YYYYMMDD_HHMMSS.log`
@@ -109,6 +112,7 @@ bin/DevScanApp.exe C:/data -e re2 -j 8 --output-json report.json
 | `--output-json <path>` | Сохранить JSON-отчёт по указанному пути |
 | `--output-txt <path>` | Сохранить TXT-отчёт по указанному пути |
 | `--no-report` | Не генерировать отчёты |
+| `--no-extract` | Не извлекать архивы (по умолчанию: авто-извлечение ZIP/7Z/RAR) |
 | `--add-sig` | Интерактивный визард для добавления новой сигнатуры |
 
 ### Вывод
@@ -118,22 +122,29 @@ bin/DevScanApp.exe C:/data -e re2 -j 8 --output-json report.json
 2. Сохраняет `crash_report/report.json` и `crash_report/report.txt` (если не указано `--no-report`)
 3. Пишет лог в `crash_report/devscan_YYYYMMDD_HHMMSS.log`
 
-Пример вывода:
+Пример вывода (сканирование архива с извлечением):
 
 ```
-[Info] Scanning: C:/data (150 files, 8 threads, engine: Hyperscan)
+[Info] Scanning: C:/data/archive.zip (150 files, 8 threads, engine: Hyperscan)
 
 --- SCAN RESULTS ---
 Type            | Count
 --------------------------
-PDF             | 10
-ZIP             | 5
-DOC             | 3
+DOCX            | 10
+PDF             | 5
+PPTX            | 3
 --------------------------
+--- EMBEDDED (inside containers) ---
+PNG             | 15
+JPG             | 5
+-----------------------------------
 Files processed: 150  (1.23s)
 [Reports] crash_report/report.json, crash_report/report.txt
 [Log]     crash_report/devscan_20260223_143052.log
 ```
+
+> **Примечание:** Секция `EMBEDDED` показывает файлы, найденные внутри контейнеров (DOCX/PPTX/ZIP).
+> Например, изображения внутри презентаций PowerPoint.
 
 ### Формат report.json
 
@@ -146,6 +157,10 @@ Files processed: 150  (1.23s)
     "PDF": 10,
     "ZIP": 5,
     "DOC": 3
+  },
+  "embedded_detections": {
+    "PNG": 5,
+    "JPG": 2
   }
 }
 ```
@@ -164,6 +179,9 @@ Files processed: 150  (1.23s)
 | `text_pattern` | string | Дополнительный regex-якорь для бинарных сигнатур |
 | `pattern` | string | Regex-паттерн для текстовых сигнатур (`type: "text"`) |
 | `deduct_from` | string | Тип-родитель для вычитания коллизий (опционально) |
+| `priority` | int | Приоритет сигнатуры (выше = проверяется первым) |
+| `min_file_size` | int | Минимальный размер файла для детекции (защита от FP) |
+| `exclusive_with` | array | Взаимоисключающие сигнатуры (например, `["RAR5"]` для RAR4) |
 
 ### Пример: бинарная сигнатура
 
