@@ -101,7 +101,7 @@
         "type": "binary",
         "extensions": [".doc"],
         "hex_head": "D0CF11E0A1B11AE1",
-        "text_pattern": "WordDocument",
+        "text_pattern": "57006F007200640044006F00630075006D0065006E007400",
         "deduct_from": "OLE",
         "priority": 8,
         "min_file_size": 4096
@@ -111,7 +111,7 @@
         "type": "binary",
         "extensions": [".xls"],
         "hex_head": "D0CF11E0A1B11AE1",
-        "text_pattern": "Workbook",
+        "text_pattern": "57006F0072006B0062006F006F006B00",
         "deduct_from": "OLE",
         "priority": 8,
         "min_file_size": 4096
@@ -121,7 +121,7 @@
         "type": "binary",
         "extensions": [".ppt"],
         "hex_head": "D0CF11E0A1B11AE1",
-        "text_pattern": "PowerPoint Document",
+        "text_pattern": "50006F0077006500720050006F0069006E007400200044006F00630075006D0065006E007400",
         "deduct_from": "OLE",
         "priority": 8,
         "min_file_size": 4096

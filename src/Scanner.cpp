@@ -33,14 +33,33 @@ namespace {
         std::string head = hex_to_regex_str(def.hex_head);
         std::string tail = hex_to_regex_str(def.hex_tail);
 
+        // text_pattern может быть hex строкой (для UTF-16LE паттернов OLE)
+        // или обычным regex паттерном
+        std::string pattern;
+        if (!def.text_pattern.empty()) {
+            // Проверяем, является ли text_pattern hex строкой (только 0-9A-Fa-F)
+            bool is_hex = true;
+            for (char c : def.text_pattern) {
+                if (!std::isxdigit(static_cast<unsigned char>(c))) {
+                    is_hex = false;
+                    break;
+                }
+            }
+            if (is_hex && def.text_pattern.length() % 2 == 0) {
+                pattern = hex_to_regex_str(def.text_pattern);
+            } else {
+                pattern = def.text_pattern;
+            }
+        }
+
         // Для бинарных сигнатур с hex_head — привязка к началу файла
         // Это предотвращает ложные срабатывания когда сигнатура найдена в середине файла
         if (!head.empty() && !tail.empty()) return "^" + head + ".*?" + tail;
-        if (!head.empty() && !def.text_pattern.empty()) return "^" + head + ".*?" + def.text_pattern;
+        if (!head.empty() && !pattern.empty()) return "^" + head + ".*?" + pattern;
         if (!head.empty()) return "^" + head;
 
-        // Fallback: head пуст, но есть text_pattern или tail
-        if (!def.text_pattern.empty()) return def.text_pattern;
+        // Fallback: head пуст, но есть pattern или tail
+        if (!pattern.empty()) return pattern;
         if (!tail.empty()) return tail;
 
         return "";
