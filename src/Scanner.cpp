@@ -45,6 +45,22 @@ namespace {
     }
 }
 
+// NOTE: deduction is single-pass (flat). Transitive chains (A deducts B, B deducts C)
+// are not supported — if such chains are added to signatures.json, a topological-sort
+// pass will be required here.
+void apply_deduction(ScanStats& stats, const std::vector<SignatureDefinition>& sigs) {
+    for (const auto& def : sigs) {
+        if (!def.deduct_from.empty()) {
+            const std::string& child = def.name;
+            const std::string& parent = def.deduct_from;
+            if (stats.counts.count(child) && stats.counts.count(parent)) {
+                int child_count = stats.counts[child];
+                stats.counts[parent] = std::max(0, stats.counts[parent] - child_count);
+            }
+        }
+    }
+}
+
 std::unique_ptr<Scanner> Scanner::create(EngineType type) {
     switch (type) {
     case EngineType::BOOST: return std::make_unique<BoostScanner>();
@@ -85,15 +101,17 @@ void BoostScanner::scan(const char* data, size_t size, ScanStats& stats) {
 }
 
 // === RE2 (two-phase: Set filter → individual count) ===
-Re2Scanner::Re2Scanner() = default;
-Re2Scanner::~Re2Scanner() {
-    delete static_cast<re2::RE2::Set*>(m_set);
+void Re2SetDeleter::operator()(void* p) const noexcept {
+    delete static_cast<re2::RE2::Set*>(p);
 }
+
+Re2Scanner::Re2Scanner() = default;  // re2::RE2 is complete here
+Re2Scanner::~Re2Scanner() = default;
+
 std::string Re2Scanner::name() const { return "Google RE2"; }
 
 void Re2Scanner::prepare(const std::vector<SignatureDefinition>& sigs) {
-    delete static_cast<re2::RE2::Set*>(m_set);
-    m_set = nullptr;
+    m_set.reset();
     m_sig_names.clear();
     m_regexes.clear();
 
@@ -117,21 +135,20 @@ void Re2Scanner::prepare(const std::vector<SignatureDefinition>& sigs) {
     re2::RE2::Options set_opt;
     set_opt.set_encoding(re2::RE2::Options::EncodingLatin1);
     set_opt.set_dot_nl(true);
-    auto* set = new re2::RE2::Set(set_opt, re2::RE2::UNANCHORED);
+    std::unique_ptr<void, Re2SetDeleter> new_set(new re2::RE2::Set(set_opt, re2::RE2::UNANCHORED));
+    auto* raw = static_cast<re2::RE2::Set*>(new_set.get());
 
     for (const auto& [re, sig_name] : m_regexes) {
         std::string err;
-        set->Add(re->pattern(), &err);
+        raw->Add(re->pattern(), &err);
     }
-    if (set->Compile()) {
-        m_set = set;
-    } else {
-        delete set;
+    if (raw->Compile()) {
+        m_set = std::move(new_set);
     }
 }
 
 void Re2Scanner::scan(const char* data, size_t size, ScanStats& stats) {
-    auto* set = static_cast<re2::RE2::Set*>(m_set);
+    auto* set = static_cast<re2::RE2::Set*>(m_set.get());
     if (!set) {
         // Fallback: no set compiled, scan all individually
         for (const auto& [re, name] : m_regexes) {
@@ -191,6 +208,7 @@ void HsScanner::prepare(const std::vector<SignatureDefinition>& sigs) {
 }
 void HsScanner::scan(const char* data, size_t size, ScanStats& stats) {
     if (!db || !scratch) return;
+    // ASSERT: this method must not be called concurrently on the same instance (scratch is not thread-safe).
     struct Ctx { ScanStats* s; const std::vector<std::string>* n; } ctx = { &stats, &m_sig_names };
     auto on_match = [](unsigned int id, unsigned long long, unsigned long long, unsigned int, void* ptr) -> int {
         auto* c = static_cast<Ctx*>(ptr);

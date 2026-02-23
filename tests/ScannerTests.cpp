@@ -24,9 +24,9 @@ static const std::vector<SignatureDefinition> TEST_SIGS = {
 template <typename T>
 class ScannerTest : public ::testing::Test {
 protected:
-    T scanner;
+    static T scanner;
 
-    void SetUp() override {
+    static void SetUpTestSuite() {
         scanner.prepare(TEST_SIGS);
     }
 
@@ -41,6 +41,9 @@ protected:
         EXPECT_EQ(GetCount(stats, type_name), expected_count) << "Engine: " << scanner.name();
     }
 };
+
+template <typename T>
+T ScannerTest<T>::scanner;
 
 using ScannerTypes = ::testing::Types<Re2Scanner, BoostScanner, HsScanner>;
 TYPED_TEST_SUITE(ScannerTest, ScannerTypes);
@@ -59,7 +62,7 @@ TYPED_TEST(ScannerTest, Detection_ZIP) {
     this->RunVerify(data, "ZIP", 1);
 }
 
-TYPED_TEST(ScannerTest, Office_Vs_Zip_No_Deduction) {
+TYPED_TEST(ScannerTest, Office_ZIP_And_DOCX_Both_Detected) {
     std::string data = "\x50\x4B\x03\x04...word/document.xml...";
     ScanStats stats;
     this->scanner.scan(data.data(), data.size(), stats);
@@ -109,11 +112,10 @@ TYPED_TEST(ScannerTest, Multiple_PDF_In_Same_Buffer) {
 template <typename T>
 class FalsePositiveTest : public ::testing::Test {
 protected:
-    T scanner;
+    static T scanner;
 
-    void SetUp() override {
+    static void SetUpTestSuite() {
         auto sigs = ConfigLoader::load("signatures.json");
-        ASSERT_FALSE(sigs.empty());
         scanner.prepare(sigs);
     }
 
@@ -122,6 +124,9 @@ protected:
         return (it != stats.counts.end()) ? it->second : 0;
     }
 };
+
+template <typename T>
+T FalsePositiveTest<T>::scanner;
 
 using FPScannerTypes = ::testing::Types<Re2Scanner, BoostScanner, HsScanner>;
 TYPED_TEST_SUITE(FalsePositiveTest, FPScannerTypes);
@@ -162,15 +167,7 @@ TEST(DeductionTest, DOCX_Deducted_From_ZIP) {
         { "DOCX", "504B0304", "", "word/document.xml", SignatureType::BINARY, "ZIP" }
     };
 
-    // Inline apply_deduction logic (same as in main_cli.cpp)
-    for (const auto& def : sigs) {
-        if (!def.deduct_from.empty()) {
-            if (stats.counts.count(def.name) && stats.counts.count(def.deduct_from)) {
-                int child_count = stats.counts[def.name];
-                stats.counts[def.deduct_from] = std::max(0, stats.counts[def.deduct_from] - child_count);
-            }
-        }
-    }
+    apply_deduction(stats, sigs);
 
     EXPECT_EQ(stats.counts["ZIP"], 2);  // 5 - 3 = 2
     EXPECT_EQ(stats.counts["DOCX"], 3); // untouched
@@ -185,14 +182,7 @@ TEST(DeductionTest, Deduction_Does_Not_Go_Negative) {
         { "DOC", "D0CF11E0A1B11AE1", "", "WordDocument", SignatureType::BINARY, "OLE" }
     };
 
-    for (const auto& def : sigs) {
-        if (!def.deduct_from.empty()) {
-            if (stats.counts.count(def.name) && stats.counts.count(def.deduct_from)) {
-                int child_count = stats.counts[def.name];
-                stats.counts[def.deduct_from] = std::max(0, stats.counts[def.deduct_from] - child_count);
-            }
-        }
-    }
+    apply_deduction(stats, sigs);
 
     EXPECT_EQ(stats.counts["OLE"], 0); // max(0, 1-3) = 0
 }

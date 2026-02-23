@@ -35,6 +35,8 @@ struct ScanStats {
     }
 };
 
+void apply_deduction(ScanStats& stats, const std::vector<SignatureDefinition>& sigs);
+
 class Scanner {
 public:
     virtual ~Scanner() = default;
@@ -53,19 +55,25 @@ private:
     std::vector<std::pair<boost::regex, std::string>> m_regexes;
 };
 
+// RE2::Set is a nested class and cannot be forward-declared; use type-erased deleter.
+struct Re2SetDeleter { void operator()(void* p) const noexcept; };
+
 class Re2Scanner : public Scanner {
 public:
-    Re2Scanner();
-    ~Re2Scanner() override;
+    Re2Scanner();           // defined in Scanner.cpp where re2::RE2 is complete
+    ~Re2Scanner() override; // defined in Scanner.cpp where re2::RE2 is complete
     void prepare(const std::vector<SignatureDefinition>& sigs) override;
     void scan(const char* data, size_t size, ScanStats& stats) override;
     std::string name() const override;
 private:
-    void* m_set = nullptr; // RE2::Set* (opaque — nested class, can't forward-declare)
+    std::unique_ptr<void, Re2SetDeleter> m_set;
     std::vector<std::string> m_sig_names;
     std::vector<std::pair<std::unique_ptr<re2::RE2>, std::string>> m_regexes;
 };
 
+// NOTE: HsScanner is NOT thread-safe for concurrent scan() calls on a single instance.
+// hs_scratch is not shareable between threads. Each thread must own its own HsScanner.
+// In main_cli.cpp every worker thread calls Scanner::create() independently — this is correct.
 class HsScanner : public Scanner {
 public:
     HsScanner();

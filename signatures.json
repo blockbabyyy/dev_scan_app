@@ -37,13 +37,13 @@
         "name": "GIF",
         "type": "binary",
         "hex_head": "47494638",
-        "hex_tail": "003B"
+        "hex_tail": "3B"
     },
     {
         "name": "BMP",
         "type": "binary",
         "hex_head": "424D",
-        "text_pattern": "\\x00\\x00\\x00\\x00"
+        "hex_tail": "00000000"
     },
     {
         "name": "MKV",
@@ -104,6 +104,39 @@
         "hex_head": "504B0304",
         "text_pattern": "ppt/presentation.xml",
         "deduct_from": "ZIP"
+    },
+
+    {
+        "name": "7Z",
+        "type": "binary",
+        "hex_head": "377ABCAF271C"
+    },
+    {
+        "name": "GZIP",
+        "type": "binary",
+        "hex_head": "1F8B"
+    },
+    {
+        "name": "PE",
+        "type": "binary",
+        "hex_head": "4D5A",
+        "text_pattern": "PE"
+    },
+    {
+        "name": "SQLITE",
+        "type": "binary",
+        "hex_head": "53514C69746520666F726D6174203300"
+    },
+    {
+        "name": "FLAC",
+        "type": "binary",
+        "hex_head": "664C6143"
+    },
+    {
+        "name": "WAV",
+        "type": "binary",
+        "hex_head": "52494646",
+        "text_pattern": "WAVE"
     },
 
     {

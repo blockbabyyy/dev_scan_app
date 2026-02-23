@@ -71,9 +71,15 @@ public:
                 sigs.push_back(def);
             }
 
-            // Validate deduct_from references
+            // Check for duplicate names
             std::set<std::string> names;
-            for (const auto& s : sigs) names.insert(s.name);
+            for (const auto& s : sigs) {
+                if (!names.insert(s.name).second) {
+                    std::cerr << "[ConfigLoader] Warning: duplicate signature name '"
+                              << s.name << "'\n";
+                }
+            }
+            // Validate deduct_from references
             for (const auto& s : sigs) {
                 if (!s.deduct_from.empty() && names.find(s.deduct_from) == names.end()) {
                     std::cerr << "[ConfigLoader] Warning: '" << s.name

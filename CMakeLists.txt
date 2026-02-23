@@ -69,8 +69,6 @@ target_link_libraries(DevScanApp PRIVATE
     Threads::Threads
 )
 
-configure_file(signatures.json signatures.json COPYONLY)
-
 # === 5. ТЕСТЫ (TESTS) ===
 enable_testing()
 
@@ -116,3 +114,19 @@ target_link_libraries(DevScanBenchmarks PRIVATE
     benchmark::benchmark
     Boost::iostreams
 )
+
+# === 7. КОПИРОВАНИЕ signatures.json В BUILD DIR ===
+add_custom_command(
+    OUTPUT  "${CMAKE_BINARY_DIR}/signatures.json"
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CMAKE_SOURCE_DIR}/signatures.json"
+            "${CMAKE_BINARY_DIR}/signatures.json"
+    DEPENDS "${CMAKE_SOURCE_DIR}/signatures.json"
+    COMMENT "Copying signatures.json to build dir"
+)
+add_custom_target(copy_signatures ALL
+    DEPENDS "${CMAKE_BINARY_DIR}/signatures.json"
+)
+add_dependencies(DevScanApp        copy_signatures)
+add_dependencies(DevScanTests      copy_signatures)
+add_dependencies(DevScanBenchmarks copy_signatures)

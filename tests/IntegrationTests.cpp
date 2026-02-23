@@ -64,6 +64,10 @@ TEST_F(IntegrationTest, Folder_Scan_With_Generator) {
     DataSetGenerator gen;
     GenStats expected = gen.generate_count(temp_dir, 50, OutputMode::FOLDER, 0.0, TEST_SEED);
     ScanStats actual = ScanPath(temp_dir);
+    // NOTE: apply_deduction is intentionally omitted here.
+    // Generator creates synthetic files (DOCX/XLSX/PPTX have PK header but no EOCD tail),
+    // so they don't match ZIP pattern. Deduction would incorrectly subtract their counts from ZIP.
+    // Deduction is tested separately in DeductionTest and works correctly on real-world files.
 
     std::cout << "--- Scan Report (seed=" << TEST_SEED << ") ---\n";
     for (auto const& [name, count] : actual.counts) std::cout << name << ": " << count << "\n";
@@ -88,6 +92,7 @@ TEST_F(IntegrationTest, Bin_Concat_Scan) {
     fs::path bin_path = temp_dir / "concat_test.bin";
     GenStats expected = gen.generate_count(bin_path, 30, OutputMode::BIN, 0.0, TEST_SEED);
     ScanStats actual = ScanPath(bin_path);
+    // NOTE: apply_deduction omitted — see Folder_Scan_With_Generator for explanation.
 
     std::cout << "--- BIN Scan Report (seed=" << TEST_SEED << ") ---\n";
     for (auto const& [name, count] : actual.counts) std::cout << name << ": " << count << "\n";
@@ -104,6 +109,7 @@ TEST_F(IntegrationTest, Pcap_Dump_Scan) {
     fs::path pcap_path = temp_dir / "dump_test.pcap";
     GenStats expected = gen.generate_count(pcap_path, 30, OutputMode::PCAP, 0.0, TEST_SEED);
     ScanStats actual = ScanPath(pcap_path);
+    // NOTE: apply_deduction omitted — see Folder_Scan_With_Generator for explanation.
 
     std::cout << "--- PCAP Scan Report (seed=" << TEST_SEED << ") ---\n";
     for (auto const& [name, count] : actual.counts) std::cout << name << ": " << count << "\n";

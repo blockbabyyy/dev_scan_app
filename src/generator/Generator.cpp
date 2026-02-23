@@ -6,21 +6,22 @@
 #include <random>
 #include <ctime>
 #include <iomanip>
+#include <mutex>
 
 // --- CRC32 ---
 static uint32_t crc32_table[256];
-static bool crc_initialized = false;
+static std::once_flag crc_init_flag;
 
 static void init_crc32() {
-    if (crc_initialized) return;
-    for (uint32_t i = 0; i < 256; i++) {
-        uint32_t c = i;
-        for (int j = 0; j < 8; j++) {
-            c = (c & 1) ? (0xEDB88320 ^ (c >> 1)) : (c >> 1);
+    std::call_once(crc_init_flag, [] {
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t c = i;
+            for (int j = 0; j < 8; j++) {
+                c = (c & 1) ? (0xEDB88320 ^ (c >> 1)) : (c >> 1);
+            }
+            crc32_table[i] = c;
         }
-        crc32_table[i] = c;
-    }
-    crc_initialized = true;
+    });
 }
 
 // Ловушки (false-positive bait)
@@ -115,7 +116,13 @@ size_t DataSetGenerator::get_realistic_size(const std::string& ext, std::mt19937
     std::uniform_int_distribution<int> chance(0, 100);
     int c = chance(rng);
 
-    if (types[ext].is_text) {
+    auto it = types.find(ext);
+    if (it == types.end()) {
+        std::uniform_int_distribution<size_t> d(10 * 1024, 100 * 1024);
+        return d(rng);
+    }
+
+    if (it->second.is_text) {
         std::uniform_int_distribution<size_t> d(1024, 200 * 1024);
         return d(rng);
     }
@@ -168,6 +175,7 @@ void DataSetGenerator::fill_complex(std::stringstream& ss, size_t count, bool is
     }
     else {
         std::uniform_int_distribution<int> trap_chance(0, 100);
+        std::uniform_int_distribution<int> byte_dist(0, 255);
         while (written < count) {
             if (trap_chance(rng) < 2 && written + 20 < count) {
                 std::uniform_int_distribution<size_t> t_idx(0, TRAPS_BIN.size() - 1);
@@ -176,7 +184,7 @@ void DataSetGenerator::fill_complex(std::stringstream& ss, size_t count, bool is
                 written += trap.size();
             }
             else {
-                ss.put(static_cast<char>(0xCC));
+                ss.put(static_cast<char>(byte_dist(rng)));
                 written++;
             }
         }

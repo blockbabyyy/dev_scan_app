@@ -24,7 +24,15 @@ inline const std::unordered_map<std::string, std::string>& ext_to_type_map() {
         {".json", "JSON"},
         {".html", "HTML"},
         {".xml",  "XML"},
-        {".eml",  "EMAIL"}
+        {".eml",  "EMAIL"},
+        {".7z",   "7Z"},
+        {".gz",   "GZIP"},
+        {".exe",  "PE"},
+        {".dll",  "PE"},
+        {".sqlite", "SQLITE"},
+        {".db",   "SQLITE"},
+        {".flac", "FLAC"},
+        {".wav",  "WAV"}
     };
     return m;
 }

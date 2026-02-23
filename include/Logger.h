@@ -16,7 +16,7 @@ public:
         return inst;
     }
 
-    static void init() { instance().do_init(); }
+    static void init() { std::call_once(instance().m_init_flag, &Logger::do_init, &instance()); }
     static void info(const std::string& msg)  { instance().log("INFO",  msg, false); }
     static void warn(const std::string& msg)  { instance().log("WARN",  msg, true);  }
     static void error(const std::string& msg) { instance().log("ERROR", msg, true);  }
@@ -24,6 +24,7 @@ public:
 
 private:
     std::mutex m_mutex;
+    std::once_flag m_init_flag;
     std::ofstream m_file;
     std::string m_path;
 

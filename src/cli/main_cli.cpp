@@ -34,18 +34,6 @@ void print_ui_help() {
         << "==================================================================\n";
 }
 
-void apply_deduction(ScanStats& stats, const std::vector<SignatureDefinition>& sigs) {
-    for (const auto& def : sigs) {
-        if (!def.deduct_from.empty()) {
-            const std::string& child = def.name;
-            const std::string& parent = def.deduct_from;
-            if (stats.counts.count(child) && stats.counts.count(parent)) {
-                int child_count = stats.counts[child];
-                stats.counts[parent] = std::max(0, stats.counts[parent] - child_count);
-            }
-        }
-    }
-}
 
 int main(int argc, char* argv[]) {
     Logger::init();
@@ -54,6 +42,19 @@ int main(int argc, char* argv[]) {
     if (argc < 2) {
         print_ui_help();
         return 0;
+    }
+
+    // Handle -h/--help/--version before treating argv[1] as a path
+    {
+        std::string first = argv[1];
+        if (first == "-h" || first == "--help") {
+            print_ui_help();
+            return 0;
+        }
+        if (first == "--version") {
+            std::cout << "DevScan 1.0.0\n";
+            return 0;
+        }
     }
 
     std::string target_path = argv[1];
@@ -81,7 +82,7 @@ int main(int argc, char* argv[]) {
             if (num_threads == 0) num_threads = 1;
         }
         else if ((arg == "-m" || arg == "--max-filesize") && i + 1 < argc) {
-            max_filesize = static_cast<size_t>(std::stoi(argv[++i])) * 1024 * 1024;
+            max_filesize = std::stoull(argv[++i]) * 1024 * 1024;
         }
         else if (arg == "--output-json" && i + 1 < argc) {
             output_json = argv[++i];
