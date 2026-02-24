@@ -65,10 +65,9 @@
         "name": "BMP",
         "type": "binary",
         "extensions": [".bmp"],
-        "hex_head": "424D",
-        "hex_tail": "00000000",
+        "text_pattern": "\\x42\\x4D.{4}\\x00\\x00\\x00\\x00",
         "priority": 3,
-        "min_file_size": 100
+        "min_file_size": 54
     },
     {
         "name": "MKV",
@@ -237,7 +236,7 @@
         "name": "EMAIL",
         "type": "text",
         "extensions": [".eml"],
-        "pattern": "From:\\s.+\\r?\\n(?:To|Subject|Date|MIME-Version):",
+        "pattern": "From:\\s[^\\r\\n]+\\r?\\n(?:To|Subject|Date|MIME-Version):",
         "priority": 5,
         "min_file_size": 100
     }

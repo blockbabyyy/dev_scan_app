@@ -6,12 +6,17 @@ if(POLICY CMP0167)
 endif()
 
 # Настройки VCPKG
-set(VCPKG_ROOT "C:/vcpkg" CACHE STRING "Path to vcpkg root")
-set(VCPKG_DEFAULT_TRIPLET "x64-windows" CACHE STRING "Target triplet")
-
+# Приоритет: 1) CMAKE_TOOLCHAIN_FILE из командной строки, 2) переменная окружения VCPKG_ROOT, 3) ошибка
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
-    set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+    if(DEFINED ENV{VCPKG_ROOT})
+        set(VCPKG_ROOT "$ENV{VCPKG_ROOT}" CACHE STRING "Path to vcpkg root (from environment)")
+        set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+    else()
+        message(FATAL_ERROR "Please set VCPKG_ROOT environment variable or pass -DCMAKE_TOOLCHAIN_FILE=...")
+    endif()
 endif()
+
+set(VCPKG_DEFAULT_TRIPLET "x64-windows" CACHE STRING "Target triplet")
 
 project(DevScan)
 

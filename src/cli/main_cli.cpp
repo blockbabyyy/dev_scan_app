@@ -16,6 +16,9 @@
 #include <ctime>
 #include <functional>
 #include <zip.h>  // libzip for ZIP extraction
+#ifdef _WIN32
+#include <io.h>   // _dup, _fileno
+#endif
 #include <boost/iostreams/device/mapped_file.hpp>
 #include <nlohmann/json.hpp>
 #include "Scanner.h"
@@ -31,61 +34,52 @@ static constexpr size_t DEFAULT_MAX_FILESIZE_MB = 512;
 // ZIP extraction helper
 // ---------------------------------------------------------------------------
 
+// FIX to-do #3: open ZIP directly without loading the whole file into RAM.
+// On Windows, zip_open() uses the current system codepage for the path, which
+// breaks for UTF-8 filenames. We work around this by opening the file with
+// _wfopen_s (wide char, always correct), duplicating the fd, and handing the
+// dup to zip_fdopen so libzip owns it.
+static zip_t* open_zip_path(const fs::path& path, int* errcode) {
+#ifdef _WIN32
+    FILE* fp = nullptr;
+    if (_wfopen_s(&fp, path.wstring().c_str(), L"rb") != 0 || !fp) {
+        *errcode = ZIP_ER_OPEN;
+        return nullptr;
+    }
+    int fd = _dup(_fileno(fp));
+    fclose(fp);
+    if (fd < 0) { *errcode = ZIP_ER_OPEN; return nullptr; }
+    return zip_fdopen(fd, ZIP_RDONLY, errcode);
+#else
+    return zip_open(path.c_str(), ZIP_RDONLY, errcode);
+#endif
+}
+
 static std::string detect_office_format(const fs::path& path) {
-    // Check if file is ZIP-based container (DOCX/XLSX/PPTX)
-    // FIX: Read file into buffer first for UTF-8 path support on Windows
-    std::vector<unsigned char> buffer;
-    try {
-        std::ifstream file(path, std::ios::binary | std::ios::ate);
-        if (!file) {
-            Logger::warn("Failed to open file: " + path.filename().string());
-            return "";
-        }
-        auto size = file.tellg();
-        file.seekg(0, std::ios::beg);
-        buffer.resize(static_cast<size_t>(size));
-        file.read(reinterpret_cast<char*>(buffer.data()), size);
-    }
-    catch (const std::exception& e) {
-        Logger::warn("Failed to read file: " + path.filename().string() + " - " + e.what());
-        return "";
-    }
-
-    zip_error_t error;
-    zip_error_init(&error);
-
-    zip_source_t* source = zip_source_buffer_create(buffer.data(), buffer.size(), 0, &error);
-    if (!source) {
-        Logger::warn("Failed to create ZIP buffer source: " + path.filename().string());
-        zip_error_fini(&error);
-        return "";
-    }
-
-    zip_t* archive = zip_open_from_source(source, ZIP_RDONLY, &error);
+    int errcode = 0;
+    zip_t* archive = open_zip_path(path, &errcode);
     if (!archive) {
-        Logger::warn("Failed to open ZIP: " + path.filename().string() +
-                     " - " + zip_error_strerror(&error));
-        zip_source_free(source);
-        zip_error_fini(&error);
+        if (errcode != 0) {
+            zip_error_t ze; zip_error_init_with_code(&ze, errcode);
+            Logger::warn("Failed to open ZIP: " + path.filename().string()
+                         + " - " + zip_error_strerror(&ze));
+            zip_error_fini(&ze);
+        }
         return "";
     }
 
     zip_int64_t num_entries = zip_get_num_entries(archive, 0);
     std::set<std::string> entries;
-
     for (zip_int64_t i = 0; i < num_entries; ++i) {
         const char* name = zip_get_name(archive, i, ZIP_FL_ENC_RAW);
-        if (name) {
-            entries.insert(name);
-        }
+        if (name) entries.insert(name);
     }
-    zip_close(archive);  // This also frees the source
+    zip_close(archive);
 
-    if (entries.count("word/document.xml")) return "DOCX";
-    if (entries.count("xl/workbook.xml")) return "XLSX";
+    if (entries.count("word/document.xml"))   return "DOCX";
+    if (entries.count("xl/workbook.xml"))     return "XLSX";
     if (entries.count("ppt/presentation.xml")) return "PPTX";
-
-    return entries.count("EOCD") ? "ZIP" : "";
+    return "";
 }
 
 static std::vector<fs::path> extract_zip_entries(const fs::path& zip_path,
@@ -93,47 +87,13 @@ static std::vector<fs::path> extract_zip_entries(const fs::path& zip_path,
                                                   int max_entries, size_t max_size) {
     std::vector<fs::path> extracted;
 
-    // FIX: Read file into buffer first for UTF-8 path support on Windows
-    std::vector<unsigned char> buffer;
-    try {
-        std::ifstream file(zip_path, std::ios::binary | std::ios::ate);
-        if (!file) {
-            zip_error_t dummy_error;
-            zip_error_init(&dummy_error);
-            Logger::warn("Failed to open ZIP file: " + zip_path.filename().string());
-            zip_error_fini(&dummy_error);
-            return extracted;
-        }
-        auto size = file.tellg();
-        file.seekg(0, std::ios::beg);
-        buffer.resize(static_cast<size_t>(size));
-        file.read(reinterpret_cast<char*>(buffer.data()), size);
-    }
-    catch (const std::exception& e) {
-        Logger::warn("Failed to read ZIP file: " + zip_path.filename().string() + " - " + e.what());
-        return extracted;
-    }
-
-    zip_error_t error;
-    zip_error_init(&error);
-
-    zip_source_t* source = zip_source_buffer_create(buffer.data(), buffer.size(), 0, &error);
-    if (!source) {
-        zip_error_fini(&error);
-        return extracted;
-    }
-
-    zip_t* archive = zip_open_from_source(source, ZIP_RDONLY, &error);
-    if (!archive) {
-        zip_source_free(source);
-        zip_error_fini(&error);
-        return extracted;
-    }
+    int errcode = 0;
+    zip_t* archive = open_zip_path(zip_path, &errcode);
+    if (!archive) return extracted;
 
     zip_int64_t num_entries = zip_get_num_entries(archive, 0);
     if (num_entries > max_entries) {
         zip_close(archive);
-        zip_error_fini(&error);
         return extracted;
     }
 
@@ -142,28 +102,26 @@ static std::vector<fs::path> extract_zip_entries(const fs::path& zip_path,
         const char* name = zip_get_name(archive, i, ZIP_FL_ENC_RAW);
         if (!name) continue;
         std::string name_str(name);
-        if (name_str.empty() || name_str.back() == '/') continue;  // Skip directories
+        if (name_str.empty() || name_str.back() == '/') continue;
 
         zip_stat_t stat;
         if (zip_stat_index(archive, i, 0, &stat) != 0) continue;
-
         if (total_size + stat.size > max_size) break;
 
-        zip_file_t* file = zip_fopen_index(archive, i, 0);
-        if (!file) continue;
+        zip_file_t* zf = zip_fopen_index(archive, i, 0);
+        if (!zf) continue;
 
-        std::vector<char> buffer(stat.size);
-        zip_int64_t bytes_read = zip_fread(file, buffer.data(), stat.size);
-        zip_fclose(file);
-
+        std::vector<char> entry_buf(stat.size);
+        zip_int64_t bytes_read = zip_fread(zf, entry_buf.data(), stat.size);
+        zip_fclose(zf);
         if (bytes_read != static_cast<zip_int64_t>(stat.size)) continue;
 
         fs::path out_path = temp_dir / name_str;
         fs::create_directories(out_path.parent_path());
 
-        std::ofstream out(out_path, std::ios::binary);
+        std::ofstream out(out_path.wstring(), std::ios::binary);
         if (out.is_open()) {
-            out.write(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+            out.write(entry_buf.data(), static_cast<std::streamsize>(entry_buf.size()));
             out.close();
             extracted.push_back(out_path);
             total_size += stat.size;
@@ -171,7 +129,6 @@ static std::vector<fs::path> extract_zip_entries(const fs::path& zip_path,
     }
 
     zip_close(archive);
-    zip_error_fini(&error);
     return extracted;
 }
 
@@ -548,17 +505,25 @@ int main(int argc, char* argv[]) {
 
     // Simple scan function (no recursion - recursion handled inline)
     auto scan_chunk = [&](size_t start, size_t end) -> ScanStats {
-        auto scanner = Scanner::create(engine_choice);
-        scanner->prepare(sigs);
+        // FIX to-do #1: per-file PCAP detection — two scanner instances per thread.
+        // scanner_anchored is used for all regular files (anchored=true).
+        // scanner_unanchored is used for binary streams (.pcap) where signatures
+        // can appear anywhere, not just at the file start (anchored=false).
+        auto scanner_anchored = Scanner::create(engine_choice);
+        scanner_anchored->prepare(sigs, true);
+        std::unique_ptr<Scanner> scanner_unanchored;  // lazy init — only if .pcap found
         ScanStats local;
-        std::vector<std::pair<fs::path, int>> scan_queue;  // path, depth
-        
+        // FIX to-do #5: store extraction_root explicitly so relative paths
+        // are computed via fs::relative, not by searching "devscan_" in string.
+        struct QEntry { fs::path path; int depth; fs::path root; };
+        std::vector<QEntry> scan_queue;
+
         for (size_t i = start; i < end; ++i) {
             scan_queue.clear();
-            scan_queue.push_back({file_paths[i], 0});
-            
+            scan_queue.push_back({file_paths[i], 0, {}});
+
             while (!scan_queue.empty()) {
-                auto [curr_path, depth] = scan_queue.back();
+                auto [curr_path, depth, extraction_root] = scan_queue.back();
                 scan_queue.pop_back();
 
                 if (depth > MAX_CONTAINER_DEPTH) continue;
@@ -566,71 +531,79 @@ int main(int argc, char* argv[]) {
                 try {
                     auto fsize = fs::file_size(curr_path);
                     if (fsize == 0 || fsize > max_filesize) continue;
+                }
+                catch (const fs::filesystem_error& e) {
+                    Logger::warn("Cannot access file: " + curr_path.string() + " - " + e.what());
+                    continue;
+                }
 
-                    // FIX: Skip Office Open XML system files to avoid false positives
-                    // These are internal structure files, not actual content
-                    std::string relative_path = curr_path.filename().string();
-                    if (depth > 0) {
-                        // For extracted files, check against Office XML exceptions
-                        // Get relative path from temp directory
-                        std::string full_str = curr_path.string();
-                        size_t temp_pos = full_str.find("devscan_");
-                        if (temp_pos != std::string::npos) {
-                            relative_path = full_str.substr(temp_pos);
-                            // Find the part after the temp dir name
-                            size_t slash_pos = relative_path.find('/');
-                            if (slash_pos != std::string::npos) {
-                                relative_path = relative_path.substr(slash_pos + 1);
-                            } else {
-                                size_t backslash_pos = relative_path.find('\\');
-                                if (backslash_pos != std::string::npos) {
-                                    relative_path = relative_path.substr(backslash_pos + 1);
-                                }
-                            }
-                        }
-                        // is_office_system_file will normalize path separators internally
-                        
-                        if (is_office_system_file(relative_path)) {
-                            processed++;
-                            continue;
+                try {
+
+                    // FIX to-do #5: compute relative path from extraction_root directly
+                    // instead of searching for "devscan_" substring in the absolute path.
+                    std::string relative_path;
+                    if (depth > 0 && !extraction_root.empty()) {
+                        std::error_code ec;
+                        fs::path rel = fs::relative(curr_path, extraction_root, ec);
+                        if (!ec) {
+                            relative_path = rel.generic_string();  // forward slashes
+                        } else {
+                            relative_path = curr_path.filename().string();
                         }
                     }
-                    
-                    // FIX: Also skip files by extension to avoid false positives
-                    // EMF files in docProps are not actual BMP images
-                    // XML files in Office containers are internal structure, not actual content
+
                     std::string file_ext = curr_path.extension().string();
                     std::transform(file_ext.begin(), file_ext.end(), file_ext.begin(), ::tolower);
-                    if (file_ext == ".emf" || file_ext == ".bin" || file_ext == ".rels") {
-                        processed++;
-                        continue;
-                    }
-                    
-                    // FIX: Skip XML files from Office containers (except at root level)
-                    // document.xml, workbook.xml, presentation.xml are internal structure
-                    if (file_ext == ".xml" && depth > 0) {
-                        std::string full_str = curr_path.string();
-                        // Skip XML from word/, xl/, ppt/, docProps/, customXml/
-                        if (full_str.find("/word/") != std::string::npos ||
-                            full_str.find("\\word\\") != std::string::npos ||
-                            full_str.find("/xl/") != std::string::npos ||
-                            full_str.find("\\xl\\") != std::string::npos ||
-                            full_str.find("/ppt/") != std::string::npos ||
-                            full_str.find("\\ppt\\") != std::string::npos ||
-                            full_str.find("/docProps/") != std::string::npos ||
-                            full_str.find("/customXml/") != std::string::npos) {
-                            processed++;
+
+                    if (depth > 0 && !relative_path.empty()) {
+                        // Skip Office Open XML system files (internal structure, not content)
+                        if (is_office_system_file(relative_path)) continue;
+
+                        // Skip EMF/BIN/RELS by extension (docProps thumbnails, printer settings)
+                        if (file_ext == ".emf" || file_ext == ".bin" || file_ext == ".rels") continue;
+
+                        // Skip XML files from known Office subdirectories
+                        if (file_ext == ".xml" &&
+                            (relative_path.find("word/")      == 0 ||
+                             relative_path.find("xl/")        == 0 ||
+                             relative_path.find("ppt/")       == 0 ||
+                             relative_path.find("docProps/")  == 0 ||
+                             relative_path.find("customXml/") == 0 ||
+                             relative_path.find("[Content_Types]") == 0)) {
                             continue;
                         }
+                    } else if (depth > 0) {
+                        // Fallback when extraction_root unavailable: skip by extension only
+                        if (file_ext == ".emf" || file_ext == ".bin" || file_ext == ".rels") continue;
                     }
 
                     boost::iostreams::mapped_file_source mmap(curr_path.string());
                     if (!mmap.is_open()) continue;
 
+                    // FIX to-do #1: per-file binary-stream detection.
+                    // .pcap files are binary streams — scan unanchored, count every occurrence.
+                    std::string curr_ext = curr_path.extension().string();
+                    std::transform(curr_ext.begin(), curr_ext.end(), curr_ext.begin(), ::tolower);
+                    bool is_binary_stream = (curr_ext == ".pcap");
+                    if (is_binary_stream && !scanner_unanchored) {
+                        // Hyperscan reports every end-of-match position for patterns
+                        // with a tail (e.g. GIF8.*?; → every ';' after any 'GIF8').
+                        // RE2 uses FindAndConsume which gives correct non-overlapping
+                        // counts identical to Python re.findall.
+                        EngineType pcap_engine = (engine_choice == EngineType::HYPERSCAN)
+                                                 ? EngineType::RE2 : engine_choice;
+                        scanner_unanchored = Scanner::create(pcap_engine);
+                        scanner_unanchored->prepare(sigs, false);
+                    }
+                    Scanner* active_scanner = is_binary_stream
+                        ? scanner_unanchored.get()
+                        : scanner_anchored.get();
+
                     ScanStats file_stats;
                     file_stats.reset_file_state();
-                    scanner->scan(mmap.data(), mmap.size(), file_stats);
+                    active_scanner->scan(mmap.data(), mmap.size(), file_stats, is_binary_stream);
                     file_stats.total_files_processed++;
+                    local.total_files_processed++;
 
                     bool is_embedded = (depth > 0);
 
@@ -673,17 +646,21 @@ int main(int argc, char* argv[]) {
                                             std::to_string(extracted.size()) + " entries");
 
                                 for (const auto& entry : extracted) {
-                                    scan_queue.push_back({entry, depth + 1});
+                                    scan_queue.push_back({entry, depth + 1, temp_dir});
                                 }
                             }
                         }
                     }
                 }
+                catch (const fs::filesystem_error& e) {
+                    Logger::warn("Filesystem error: " + curr_path.string() + " - " + e.what());
+                }
                 catch (const std::exception& e) {
                     Logger::warn("Skipped: " + curr_path.string() + ": " + e.what());
                 }
-                processed++;
             }
+            // FIX to-do #7: increment once per file_paths[i], not per scan_queue entry
+            processed++;
         }
         return local;
     };
@@ -726,9 +703,9 @@ int main(int argc, char* argv[]) {
     double elapsed = std::chrono::duration<double>(t_end - t_start).count();
 
     apply_deduction(results, sigs);
-    apply_container_hierarchy(results);  // Apply container hierarchy (ZIP-derived formats)
+    // apply_container_hierarchy removed: deduct_from in signatures.json already handles
+    // DOCX/XLSX/PPTX -> ZIP deduction; calling both caused double-subtraction (to-do #2)
     apply_exclusive_filter(results, sigs);  // Handle mutually exclusive signatures (RAR4/RAR5)
-    // apply_container_false_positive_filter removed - replaced with recursive container scanning
     Logger::info("Scan complete. Files: " + std::to_string(results.total_files_processed)
                  + ", time: " + std::to_string(elapsed) + "s");
 

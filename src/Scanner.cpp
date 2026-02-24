@@ -27,7 +27,7 @@ namespace {
         return ss.str();
     }
 
-    std::string build_pattern(const SignatureDefinition& def) {
+    std::string build_pattern(const SignatureDefinition& def, bool anchored = true) {
         if (def.type == SignatureType::TEXT) return def.text_pattern;
 
         std::string head = hex_to_regex_str(def.hex_head);
@@ -52,15 +52,22 @@ namespace {
             }
         }
 
-        // Для бинарных сигнатур с hex_head — привязка к началу файла
+        // Для бинарных сигнатур с hex_head — привязка к началу файла (если anchored=true)
         // Это предотвращает ложные срабатывания когда сигнатура найдена в середине файла
-        if (!head.empty() && !tail.empty()) return "^" + head + ".*?" + tail;
-        if (!head.empty() && !pattern.empty()) return "^" + head + ".*?" + pattern;
-        if (!head.empty()) return "^" + head;
+        if (!head.empty() && !tail.empty()) {
+            return anchored ? ("^" + head + ".*?" + tail) : (head + ".*?" + tail);
+        }
+        if (!head.empty() && !pattern.empty()) {
+            return anchored ? ("^" + head + ".*?" + pattern) : (head + ".*?" + pattern);
+        }
+        if (!head.empty()) {
+            return anchored ? ("^" + head) : head;
+        }
 
-        // Fallback: head пуст, но есть pattern или tail
-        if (!pattern.empty()) return pattern;
-        if (!tail.empty()) return tail;
+        // Fallback: head empty — anchoring applied to pattern/tail directly.
+        // This supports binary signatures that use only text_pattern (e.g. BMP).
+        if (!pattern.empty()) return anchored ? ("^" + pattern) : pattern;
+        if (!tail.empty())    return anchored ? ("^" + tail)    : tail;
 
         return "";
     }
@@ -69,15 +76,18 @@ namespace {
 // NOTE: deduction is single-pass (flat). Transitive chains (A deducts B, B deducts C)
 // are not supported — if such chains are added to signatures.json, a topological-sort
 // pass will be required here.
+// FIX to-do #4: apply deduction to both standalone and embedded counts.
+static void deduct_from_map(std::map<std::string, int>& m,
+                             const std::string& child, const std::string& parent) {
+    if (m.count(child) && m.count(parent))
+        m[parent] = std::max(0, m[parent] - m[child]);
+}
+
 void apply_deduction(ScanStats& stats, const std::vector<SignatureDefinition>& sigs) {
     for (const auto& def : sigs) {
         if (!def.deduct_from.empty()) {
-            const std::string& child = def.name;
-            const std::string& parent = def.deduct_from;
-            if (stats.counts.count(child) && stats.counts.count(parent)) {
-                int child_count = stats.counts[child];
-                stats.counts[parent] = std::max(0, stats.counts[parent] - child_count);
-            }
+            deduct_from_map(stats.counts, def.name, def.deduct_from);
+            deduct_from_map(stats.embedded_counts, def.name, def.deduct_from);
         }
     }
 }
@@ -108,37 +118,31 @@ void apply_embedded_detection_filter(ScanStats& stats) {
 
 // Handle mutually exclusive signatures (e.g., RAR4 vs RAR5)
 // If RAR5 is detected, RAR4 should not be counted (RAR5 includes RAR4 header)
-void apply_exclusive_filter(ScanStats& stats, const std::vector<SignatureDefinition>& sigs) {
+// FIX to-do #4: apply to both standalone and embedded counts.
+static void exclusive_filter_map(std::map<std::string, int>& m,
+                                  const std::vector<SignatureDefinition>& sigs) {
     for (const auto& def : sigs) {
         if (def.exclusive_with.empty()) continue;
-        
         const std::string& name = def.name;
-        if (!stats.counts.count(name)) continue;
-        
-        // Check if any exclusive signature is also detected
+        if (!m.count(name)) continue;
         for (const auto& exclusive : def.exclusive_with) {
-            if (stats.counts.count(exclusive)) {
-                // This signature is exclusive with another detected one
-                // Keep the one with higher priority
-                int this_priority = def.priority;
+            if (m.count(exclusive)) {
                 int other_priority = 0;
                 for (const auto& s : sigs) {
-                    if (s.name == exclusive) {
-                        other_priority = s.priority;
-                        break;
-                    }
+                    if (s.name == exclusive) { other_priority = s.priority; break; }
                 }
-                
-                if (this_priority < other_priority) {
-                    // Remove this one, keep the other
-                    stats.counts.erase(name);
-                } else {
-                    // Remove the other one
-                    stats.counts.erase(exclusive);
-                }
+                if (def.priority < other_priority)
+                    m.erase(name);
+                else
+                    m.erase(exclusive);
             }
         }
     }
+}
+
+void apply_exclusive_filter(ScanStats& stats, const std::vector<SignatureDefinition>& sigs) {
+    exclusive_filter_map(stats.counts, sigs);
+    exclusive_filter_map(stats.embedded_counts, sigs);
 }
 
 std::unique_ptr<Scanner> Scanner::create(EngineType type) {
@@ -152,16 +156,16 @@ std::unique_ptr<Scanner> Scanner::create(EngineType type) {
 
 // === Boost ===
 std::string BoostScanner::name() const { return "Boost.Regex"; }
-void BoostScanner::prepare(const std::vector<SignatureDefinition>& sigs) {
+void BoostScanner::prepare(const std::vector<SignatureDefinition>& sigs, bool anchored) {
     m_regexes.clear();
-    
+
     // Sort signatures by priority (higher first) for correct matching order
     std::vector<SignatureDefinition> sorted_sigs = sigs;
-    std::sort(sorted_sigs.begin(), sorted_sigs.end(), 
+    std::sort(sorted_sigs.begin(), sorted_sigs.end(),
         [](const auto& a, const auto& b) { return a.priority > b.priority; });
-    
+
     for (const auto& s : sorted_sigs) {
-        std::string pat = build_pattern(s);
+        std::string pat = build_pattern(s, anchored);
         if (pat.empty()) continue;
         try {
             auto flags = boost::regex::optimize | boost::regex::mod_s;
@@ -174,13 +178,17 @@ void BoostScanner::prepare(const std::vector<SignatureDefinition>& sigs) {
         }
     }
 }
-void BoostScanner::scan(const char* data, size_t size, ScanStats& stats) {
+void BoostScanner::scan(const char* data, size_t size, ScanStats& stats, bool count_all) {
     const char* end = data + size;
     for (const auto& [re, name] : m_regexes) {
         boost::cmatch m;
         const char* cur = data;
         while (cur < end && boost::regex_search(cur, end, m, re)) {
-            stats.add_once(name);  // Use add_once to prevent multiple counts per file
+            if (count_all) {
+                stats.counts[name]++;  // Считаем КАЖДОЕ вхождение
+            } else {
+                stats.add_once(name);  // Только одно на файл
+            }
             cur += m.position() + std::max(static_cast<std::ptrdiff_t>(1), m.length());
         }
     }
@@ -196,19 +204,19 @@ Re2Scanner::~Re2Scanner() = default;
 
 std::string Re2Scanner::name() const { return "Google RE2"; }
 
-void Re2Scanner::prepare(const std::vector<SignatureDefinition>& sigs) {
+void Re2Scanner::prepare(const std::vector<SignatureDefinition>& sigs, bool anchored) {
     m_set.reset();
     m_sig_names.clear();
     m_regexes.clear();
 
     // Sort signatures by priority (higher first) for correct matching order
     std::vector<SignatureDefinition> sorted_sigs = sigs;
-    std::sort(sorted_sigs.begin(), sorted_sigs.end(), 
+    std::sort(sorted_sigs.begin(), sorted_sigs.end(),
         [](const auto& a, const auto& b) { return a.priority > b.priority; });
 
     // Build individual regexes (for phase 2 counting)
     for (const auto& s : sorted_sigs) {
-        std::string pat = build_pattern(s);
+        std::string pat = build_pattern(s, anchored);
         if (pat.empty()) continue;
 
         re2::RE2::Options opt;
@@ -238,13 +246,16 @@ void Re2Scanner::prepare(const std::vector<SignatureDefinition>& sigs) {
     }
 }
 
-void Re2Scanner::scan(const char* data, size_t size, ScanStats& stats) {
+void Re2Scanner::scan(const char* data, size_t size, ScanStats& stats, bool count_all) {
     auto* set = static_cast<re2::RE2::Set*>(m_set.get());
     if (!set) {
         // Fallback: no set compiled, scan all individually
         for (const auto& [re, name] : m_regexes) {
             re2::StringPiece input(data, size);
-            while (re2::RE2::FindAndConsume(&input, *re)) stats.add_once(name);
+            while (re2::RE2::FindAndConsume(&input, *re)) {
+                if (count_all) stats.counts[name]++;
+                else stats.add_once(name);
+            }
         }
         return;
     }
@@ -257,7 +268,10 @@ void Re2Scanner::scan(const char* data, size_t size, ScanStats& stats) {
     for (int id : matched_ids) {
         const auto& [re, name] = m_regexes[id];
         re2::StringPiece input(data, size);
-        while (re2::RE2::FindAndConsume(&input, *re)) stats.add_once(name);
+        while (re2::RE2::FindAndConsume(&input, *re)) {
+            if (count_all) stats.counts[name]++;
+            else stats.add_once(name);
+        }
     }
 }
 
@@ -268,7 +282,7 @@ HsScanner::~HsScanner() {
     if (db) hs_free_database(db);
 }
 std::string HsScanner::name() const { return "Hyperscan"; }
-void HsScanner::prepare(const std::vector<SignatureDefinition>& sigs) {
+void HsScanner::prepare(const std::vector<SignatureDefinition>& sigs, bool anchored) {
     if (scratch) { hs_free_scratch(scratch); scratch = nullptr; }
     if (db) { hs_free_database(db); db = nullptr; }
     m_temp_patterns.clear(); m_sig_names.clear();
@@ -276,14 +290,14 @@ void HsScanner::prepare(const std::vector<SignatureDefinition>& sigs) {
 
     // Sort signatures by priority (higher first) for correct matching order
     std::vector<SignatureDefinition> sorted_sigs = sigs;
-    std::sort(sorted_sigs.begin(), sorted_sigs.end(), 
+    std::sort(sorted_sigs.begin(), sorted_sigs.end(),
         [](const auto& a, const auto& b) { return a.priority > b.priority; });
 
     std::vector<const char*> exprs;
     std::vector<unsigned int> flags, ids;
 
     for (size_t i = 0; i < sorted_sigs.size(); ++i) {
-        std::string pat = build_pattern(sorted_sigs[i]);
+        std::string pat = build_pattern(sorted_sigs[i], anchored);
         if (pat.empty()) continue;
         m_temp_patterns.push_back(pat);
         m_sig_names.push_back(sorted_sigs[i].name);
@@ -297,18 +311,24 @@ void HsScanner::prepare(const std::vector<SignatureDefinition>& sigs) {
     if (hs_compile_multi(exprs.data(), flags.data(), ids.data(), static_cast<unsigned int>(exprs.size()), HS_MODE_BLOCK, nullptr, &db, &err) != HS_SUCCESS) {
         std::cerr << "[Scanner] HS Compile Error: " << err->message << std::endl;
         hs_free_compile_error(err);
+        db = nullptr;       // Явно сбросить на случай частичной инициализации
+        scratch = nullptr;  // Чтобы scan() не вызвался с невалидным состоянием
+        return;
     }
     else {
         hs_alloc_scratch(db, &scratch);
     }
 }
-void HsScanner::scan(const char* data, size_t size, ScanStats& stats) {
-    if (!db || !scratch) return;
+void HsScanner::scan(const char* data, size_t size, ScanStats& stats, bool count_all) {
+    if (!db || !scratch || !data || size == 0) return;
     // ASSERT: this method must not be called concurrently on the same instance (scratch is not thread-safe).
-    struct Ctx { ScanStats* s; const std::vector<std::string>* n; } ctx = { &stats, &m_sig_names };
+    struct Ctx { ScanStats* s; const std::vector<std::string>* n; bool count_all; } ctx = { &stats, &m_sig_names, count_all };
     auto on_match = [](unsigned int id, unsigned long long, unsigned long long, unsigned int, void* ptr) -> int {
         auto* c = static_cast<Ctx*>(ptr);
-        if (id < c->n->size()) c->s->add_once((*c->n)[id]);  // Use add_once to prevent multiple counts
+        if (id < c->n->size()) {
+            if (c->count_all) c->s->counts[(*c->n)[id]]++;
+            else c->s->add_once((*c->n)[id]);
+        }
         return 0;
     };
     hs_scan(db, data, size, 0, scratch, on_match, &ctx);

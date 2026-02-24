@@ -88,7 +88,17 @@ void DataSetGenerator::load_signatures(const std::string& config_path) {
         FileType ft;
         ft.extension = ext;
         ft.head = hex_to_bytes(sig.hex_head);
-        ft.middle = sig.text_pattern; // "WordDocument", "word/document.xml", etc.
+        // text_pattern may be a hex string (OLE stream names: DOC/XLS/PPT)
+        // or plain text (DOCX/XLSX/PPTX: "word/document.xml", etc.)
+        // Scanner.cpp uses the same logic to distinguish the two cases.
+        {
+            bool is_all_hex = !sig.text_pattern.empty() && sig.text_pattern.length() % 2 == 0;
+            if (is_all_hex) {
+                for (char c : sig.text_pattern)
+                    if (!std::isxdigit(static_cast<unsigned char>(c))) { is_all_hex = false; break; }
+            }
+            ft.middle = is_all_hex ? hex_to_bytes(sig.text_pattern) : sig.text_pattern;
+        }
         ft.tail = hex_to_bytes(sig.hex_tail);
         ft.is_text = false;
 

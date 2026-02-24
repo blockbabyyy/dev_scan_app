@@ -17,14 +17,19 @@ static constexpr uint32_t TEST_SEED = 42;
 class IntegrationTest : public ::testing::Test {
 protected:
     fs::path temp_dir;
-    std::unique_ptr<Scanner> scanner;
+    // scanner_anchored: for folder/file scanning (signatures only at file start)
+    std::unique_ptr<Scanner> scanner_anchored;
+    // scanner_stream: for BIN/PCAP scanning (signatures at arbitrary offsets)
+    std::unique_ptr<Scanner> scanner_stream;
     std::vector<SignatureDefinition> sigs;
 
     void SetUp() override {
         sigs = ConfigLoader::load("signatures.json");
         ASSERT_FALSE(sigs.empty()) << "Failed to load signatures.json";
-        scanner = Scanner::create(EngineType::HYPERSCAN);
-        scanner->prepare(sigs);
+        scanner_anchored = Scanner::create(EngineType::HYPERSCAN);
+        scanner_anchored->prepare(sigs, true);
+        scanner_stream = Scanner::create(EngineType::HYPERSCAN);
+        scanner_stream->prepare(sigs, false);
         temp_dir = fs::temp_directory_path() / ("devscan_int_" + std::to_string(TEST_SEED));
         fs::create_directories(temp_dir);
     }
@@ -36,13 +41,14 @@ protected:
         return (it != stats.counts.end()) ? it->second : 0;
     }
 
+    // ScanPath: anchored scanning for regular files/folders
     ScanStats ScanPath(const fs::path& path) {
         ScanStats stats;
         auto scan_file = [&](const fs::path& p) {
             try {
                 if (fs::file_size(p) == 0) return;
                 boost::iostreams::mapped_file_source mmap(p.string());
-                if (mmap.is_open()) scanner->scan(mmap.data(), mmap.size(), stats);
+                if (mmap.is_open()) scanner_anchored->scan(mmap.data(), mmap.size(), stats);
             }
             catch (...) {}
         };
@@ -55,6 +61,19 @@ protected:
         else if (fs::exists(path)) {
             scan_file(path);
         }
+        return stats;
+    }
+
+    // ScanStream: unanchored scanning for BIN/PCAP binary streams
+    ScanStats ScanStream(const fs::path& path) {
+        ScanStats stats;
+        try {
+            if (!fs::exists(path) || fs::file_size(path) == 0) return stats;
+            boost::iostreams::mapped_file_source mmap(path.string());
+            if (mmap.is_open())
+                scanner_stream->scan(mmap.data(), mmap.size(), stats, true);
+        }
+        catch (...) {}
         return stats;
     }
 };
@@ -100,7 +119,7 @@ TEST_F(IntegrationTest, Bin_Concat_Scan) {
     DataSetGenerator gen;
     fs::path bin_path = temp_dir / "concat_test.bin";
     GenStats expected = gen.generate_count(bin_path, 30, OutputMode::BIN, 0.0, TEST_SEED);
-    ScanStats actual = ScanPath(bin_path);
+    ScanStats actual = ScanStream(bin_path);  // BIN is a binary stream — unanchored
     // NOTE: apply_deduction omitted — see Folder_Scan_With_Generator for explanation.
 
     std::cout << "--- BIN Scan Report (seed=" << TEST_SEED << ") ---\n";
@@ -126,7 +145,7 @@ TEST_F(IntegrationTest, Pcap_Dump_Scan) {
     DataSetGenerator gen;
     fs::path pcap_path = temp_dir / "dump_test.pcap";
     GenStats expected = gen.generate_count(pcap_path, 30, OutputMode::PCAP, 0.0, TEST_SEED);
-    ScanStats actual = ScanPath(pcap_path);
+    ScanStats actual = ScanStream(pcap_path);  // PCAP is a binary stream — unanchored
     // NOTE: apply_deduction omitted — see Folder_Scan_With_Generator for explanation.
 
     std::cout << "--- PCAP Scan Report (seed=" << TEST_SEED << ") ---\n";

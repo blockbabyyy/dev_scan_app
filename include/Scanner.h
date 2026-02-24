@@ -48,22 +48,26 @@ struct SignatureDefinition {
     std::string hex_tail;                // Magic bytes конца файла (опционально)
     std::string text_pattern;            // Regex для текстовых сигнатур или доп. паттерн
     SignatureType type = SignatureType::BINARY;  // Тип сигнатуры
-    
+
     // Механизм вычитания коллизий
     // Пример: DOCX — это ZIP с определённой структурой
     // Если найден DOCX, вычитаем 1 из счётчика ZIP
     std::string deduct_from;
-    
+
     std::vector<std::string> extensions;  // Расширения файлов (.pdf, .docx)
     int priority = 0;                     // Приоритет (выше = проверяется первым)
                                           // Нужно для разрешения конфликтов (RAR4 vs RAR5)
     int min_file_size = 0;                // Минимальный размер файла для детекции
                                           // Защита от ложных срабатываний на маленьких файлах
-    
+
     // Взаимоисключающие сигнатуры
     // Пример: RAR4 exclusive_with ["RAR5"]
     // RAR5 включает заголовок RAR4, поэтому если найден RAR5, RAR4 не показываем
     std::vector<std::string> exclusive_with;
+    
+    // Якорь начала файла — если true, сигнатура ищется только в начале файла
+    // Если false, сигнатура может быть найдена в любом месте (для PCAP, embedded файлов)
+    bool anchored = true;
 };
 
 // Статистика сканирования одного файла или группы файлов
@@ -184,15 +188,30 @@ inline const std::set<std::string> OFFICE_XML_EXCEPTIONS = {
     "customXml/itemProps1.xml",
     "customXml/_rels/item1.xml.rels",
     
-    // Slide layouts и masters (PPTX)
+    // Slide layouts и masters (PPTX) — все служебные папки, не медиа
     "ppt/slideMasters/",
     "ppt/slideLayouts/",
     "ppt/slides/",
     "ppt/notesSlides/",
+    "ppt/notesMasters/",     // FIX: was missing, caused XML false positives
     "ppt/handoutMasters/",
-    
+    "ppt/fonts/",            // embedded font data — not media content
+
     // Printer settings (binary)
-    "ppt/printerSettings/"
+    "ppt/printerSettings/",
+
+    // Excel sheets and chart data
+    "xl/worksheets/",
+    "xl/charts/",
+    "xl/drawings/",
+    "xl/tables/",
+    "xl/sharedStrings.xml",
+    "xl/calcChain.xml",
+
+    // Word shared styles and themes (additional)
+    "word/charts/",
+    "word/drawings/",
+    "word/diagrams/"
 };
 
 // Фильтр для исключения служебных файлов Office
@@ -264,20 +283,24 @@ void apply_embedded_detection_filter(ScanStats& stats);
 class Scanner {
 public:
     virtual ~Scanner() = default;
-    
+
     // Подготовка движка — компиляция паттернов
     // Вызывается один раз перед сканированием группы файлов
-    virtual void prepare(const std::vector<SignatureDefinition>& sigs) = 0;
-    
+    // anchored: если true, бинарные сигнатуры ищутся только в начале файла (для файлов)
+    //           если false, сигнатуры ищутся везде (для PCAP, embedded)
+    virtual void prepare(const std::vector<SignatureDefinition>& sigs, bool anchored = true) = 0;
+
     // Сканирование данных
     // data: указатель на данные файла (memory-mapped)
     // size: размер данных в байтах
     // stats: структура для записи результатов
-    virtual void scan(const char* data, size_t size, ScanStats& stats) = 0;
-    
+    // count_all: если true, считает КАЖДОЕ вхождение сигнатуры (для PCAP)
+    //            если false, считает по одному на файл (для обычных файлов)
+    virtual void scan(const char* data, size_t size, ScanStats& stats, bool count_all = false) = 0;
+
     // Название движка для вывода в отчёте
     virtual std::string name() const = 0;
-    
+
     // Фабричный метод для создания нужного движка
     // Пример: auto scanner = Scanner::create(EngineType::HYPERSCAN);
     static std::unique_ptr<Scanner> create(EngineType type);
@@ -288,8 +311,8 @@ public:
 // Минусы: медленный (backtracking regex), нет оптимизаций
 class BoostScanner : public Scanner {
 public:
-    void prepare(const std::vector<SignatureDefinition>& sigs) override;
-    void scan(const char* data, size_t size, ScanStats& stats) override;
+    void prepare(const std::vector<SignatureDefinition>& sigs, bool anchored = true) override;
+    void scan(const char* data, size_t size, ScanStats& stats, bool count_all = false) override;
     std::string name() const override;
 private:
     // Пары (скомпилированный regex, имя сигнатуры)
@@ -311,8 +334,8 @@ class Re2Scanner : public Scanner {
 public:
     Re2Scanner();           // Конструктор (re2::RE2 должен быть complete типом)
     ~Re2Scanner() override; // Деструктор (освобождает память)
-    void prepare(const std::vector<SignatureDefinition>& sigs) override;
-    void scan(const char* data, size_t size, ScanStats& stats) override;
+    void prepare(const std::vector<SignatureDefinition>& sigs, bool anchored = true) override;
+    void scan(const char* data, size_t size, ScanStats& stats, bool count_all = false) override;
     std::string name() const override;
 private:
     std::unique_ptr<void, Re2SetDeleter> m_set;  // RE2::Set для фильтра
@@ -332,8 +355,8 @@ class HsScanner : public Scanner {
 public:
     HsScanner();
     ~HsScanner() override;
-    void prepare(const std::vector<SignatureDefinition>& sigs) override;
-    void scan(const char* data, size_t size, ScanStats& stats) override;
+    void prepare(const std::vector<SignatureDefinition>& sigs, bool anchored = true) override;
+    void scan(const char* data, size_t size, ScanStats& stats, bool count_all = false) override;
     std::string name() const override;
 private:
     hs_database* db = nullptr;       // Скомпилированная база паттернов
